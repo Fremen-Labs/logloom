@@ -91,13 +91,20 @@ class PythonScanner:
             return text
 
         if node.type == "binary_operator":
-            # Very simplistic concat handling: left + right
+            # Handle concats like: "Invalid user " + str(user_id)
             left = node.child_by_field_name("left")
             right = node.child_by_field_name("right")
             if left and right:
                 return self._extract_string(left, source) + self._extract_string(right, source)
 
-        # Fallback to raw text, stripping common quotes just in case
+        # If it is not a string or binary concat (e.g. a variable, a call like str(user)),
+        # replace it with a template placeholder {} so it behaves like f-strings.
+        if node.type not in ("string", "binary_operator"):
+            # Only do this if it's inside a binary_operator we are unwrapping,
+            # but since we are called recursively, this handles the `right` branch of `left + right`.
+            return "{}"
+
+        # Absolute fallback
         text = node.text.decode("utf-8")
         if text.startswith('f"') or text.startswith("f'"):
             return text[2:-1]

@@ -31,7 +31,7 @@ def test_graph_builder_pipeline(tmp_path: Path):
     node_messages = {node.message_template for node in graph.nodes.values()}
     
     assert "User {} attempting login" in node_messages
-    assert "Invalid user str(user_id)" in node_messages
+    assert "Invalid user {}" in node_messages
     assert "Login failed for {}" in node_messages
     assert "Authenticating token" in node_messages
 
