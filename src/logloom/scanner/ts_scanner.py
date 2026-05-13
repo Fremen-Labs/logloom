@@ -1,24 +1,25 @@
-"""Issue #24 — TypeScript Tree-sitter scanner.
+"""Issue #24 — TypeScript/JavaScript Tree-sitter scanner.
 
 Scans TypeScript and JavaScript source files for log calls using Tree-sitter.
-Supports: console.*, winston, pino, bunyan.
+Supports: console.*, winston, pino, bunyan, NestJS Logger, log4js.
 """
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 from typing import List, Optional
 
 from .base import LogCallSite
 from .queries.ts_logs import TS_LOGS_QUERY
 
-# Valid TS/JS log methods (manual predicate enforcement)
+# ── Valid TS/JS log methods (manual predicate enforcement) ────────────────────
 _VALID_TS_LOG_METHODS = frozenset({
     "log", "info", "warn", "error", "debug",
     "trace", "fatal", "verbose", "silly",
 })
 
-# Map JS/TS method names to normalized log levels
+# ── Level normalization ───────────────────────────────────────────────────────
 _TS_LEVEL_MAP = {
     "log": "info",
     "info": "info",
@@ -30,6 +31,9 @@ _TS_LEVEL_MAP = {
     "verbose": "debug",
     "silly": "debug",
 }
+
+# Template literal interpolation: ${expression} → {}
+_TEMPLATE_INTERP_RE = re.compile(r'\$\{[^}]*\}')
 
 
 class TypeScriptScanner:
@@ -93,8 +97,11 @@ class TypeScriptScanner:
         else:
             return []
 
-        with open(file_path, "rb") as f:
-            source = f.read()
+        try:
+            with open(file_path, "rb") as f:
+                source = f.read()
+        except (IOError, OSError):
+            return []
 
         from tree_sitter import QueryCursor
 
@@ -127,69 +134,166 @@ class TypeScriptScanner:
 
             level = _TS_LEVEL_MAP.get(method_name, "info")
             message = self._extract_string(first_arg_node, source)
-            enclosing_func = self._get_enclosing_function(method_node)
+            ctx = self._get_lexical_context(method_node)
 
             sites.append(LogCallSite(
                 file_path=str(file_path),
                 module_path=self._get_module_path(file_path),
-                class_name=None,
-                function_name=enclosing_func or "<module>",
+                class_name=ctx.get("class_name"),
+                function_name=ctx.get("function") or "<module>",
                 log_level=level,
                 message_template=message,
                 line=line,
                 column=method_node.start_point.column,
-                lexical_context={
-                    "enclosing_function": enclosing_func,
-                },
+                lexical_context=ctx,
             ))
 
         return sites
+
+    # ── String extraction ─────────────────────────────────────────────────────
 
     def _extract_string(self, node, source: bytes) -> str:
         """Extract a message template from a JS/TS string, template literal, or expression."""
         text = node.text.decode("utf-8")
 
         if node.type == "string":
-            # Strip surrounding quotes
-            return text.strip('"').strip("'")
+            # Strip surrounding quotes — handles both single and double
+            if len(text) >= 2:
+                return text[1:-1]
+            return text
 
         if node.type == "template_string":
             # Template literals: `hello ${name}` → "hello {}"
-            import re
             result = text.strip('`')
-            result = re.sub(r'\$\{[^}]*\}', '{}', result)
+            result = _TEMPLATE_INTERP_RE.sub('{}', result)
             return result
 
+        # String concatenation: "a" + variable + "b"
+        if node.type == "binary_expression":
+            left = node.child_by_field_name("left")
+            right = node.child_by_field_name("right")
+            op = node.child_by_field_name("operator")
+            if left and right and op and op.text == b"+":
+                return self._extract_string(left, source) + self._extract_string(right, source)
+
         # Variable or expression → placeholder
-        if node.type in ("identifier", "member_expression", "call_expression"):
+        if node.type in ("identifier", "member_expression", "call_expression",
+                         "new_expression", "await_expression", "number",
+                         "true", "false", "null", "undefined"):
             return "{}"
 
         # Fallback: strip quotes
-        return text.strip('"').strip("'").strip('`')
+        if len(text) >= 2 and text[0] in ('"', "'", '`') and text[-1] == text[0]:
+            return text[1:-1]
+        return text
 
-    def _get_enclosing_function(self, node) -> Optional[str]:
-        """Walk up the AST to find the enclosing function."""
+    # ── Lexical context ───────────────────────────────────────────────────────
+
+    def _get_lexical_context(self, node) -> dict:
+        """Walk up the AST to extract full lexical context."""
+        enclosing_func = None
+        class_name = None
+        in_try = False
+        in_if = False
+        in_loop = False
+        is_async = False
+
         parent = node.parent
         while parent:
-            if parent.type in (
-                "function_declaration", "method_definition",
-                "arrow_function", "function",
-            ):
-                name_node = parent.child_by_field_name("name")
-                if name_node:
-                    return name_node.text.decode("utf-8")
-                # For arrow functions assigned to a variable
-                if parent.parent and parent.parent.type == "variable_declarator":
-                    name_node = parent.parent.child_by_field_name("name")
+            ptype = parent.type
+
+            # Function declarations: function foo() {}
+            if ptype == "function_declaration":
+                if not enclosing_func:
+                    name_node = parent.child_by_field_name("name")
                     if name_node:
-                        return name_node.text.decode("utf-8")
+                        enclosing_func = name_node.text.decode("utf-8")
+                    # Check for async
+                    for child in parent.children:
+                        if child.type == "async":
+                            is_async = True
+
+            # Method definitions: class Foo { bar() {} }
+            elif ptype == "method_definition":
+                if not enclosing_func:
+                    name_node = parent.child_by_field_name("name")
+                    if name_node:
+                        enclosing_func = name_node.text.decode("utf-8")
+
+            # Arrow functions: const foo = () => {}
+            elif ptype == "arrow_function":
+                if not enclosing_func:
+                    # Arrow functions assigned to const/let/var
+                    if parent.parent and parent.parent.type == "variable_declarator":
+                        name_node = parent.parent.child_by_field_name("name")
+                        if name_node:
+                            enclosing_func = name_node.text.decode("utf-8")
+                    # Object property: { handler: () => {} }
+                    elif parent.parent and parent.parent.type == "pair":
+                        key_node = parent.parent.child_by_field_name("key")
+                        if key_node:
+                            enclosing_func = key_node.text.decode("utf-8")
+                    for child in parent.children:
+                        if child.type == "async":
+                            is_async = True
+
+            # Anonymous functions: function() {}
+            elif ptype == "function":
+                if not enclosing_func:
+                    name_node = parent.child_by_field_name("name")
+                    if name_node:
+                        enclosing_func = name_node.text.decode("utf-8")
+                    elif parent.parent and parent.parent.type == "variable_declarator":
+                        name_node = parent.parent.child_by_field_name("name")
+                        if name_node:
+                            enclosing_func = name_node.text.decode("utf-8")
+
+            # Class declarations
+            elif ptype == "class_declaration":
+                if not class_name:
+                    name_node = parent.child_by_field_name("name")
+                    if name_node:
+                        class_name = name_node.text.decode("utf-8")
+
+            # Class body (for class expressions)
+            elif ptype == "class":
+                if not class_name:
+                    name_node = parent.child_by_field_name("name")
+                    if name_node:
+                        class_name = name_node.text.decode("utf-8")
+
+            # Control flow
+            elif ptype in ("try_statement",):
+                in_try = True
+            elif ptype in ("if_statement",):
+                in_if = True
+            elif ptype in ("for_statement", "for_in_statement", "while_statement",
+                           "do_statement"):
+                in_loop = True
+
             parent = parent.parent
-        return None
+
+        # Qualify with class name if present
+        qualified = enclosing_func
+        if class_name and enclosing_func:
+            qualified = class_name + "." + enclosing_func
+
+        return {
+            "enclosing_function": enclosing_func,
+            "function": qualified or enclosing_func,
+            "class_name": class_name,
+            "in_try_except": in_try,
+            "in_if_block": in_if,
+            "in_loop": in_loop,
+            "is_async": is_async,
+        }
+
+    # ── Module path ───────────────────────────────────────────────────────────
 
     def _get_module_path(self, file_path: Path) -> str:
         """Infer a module path from the TS/JS file path."""
         parts = list(file_path.with_suffix("").parts)
-        for marker in ("src", "lib", "app"):
+        for marker in ("src", "lib", "app", "pages", "components", "api"):
             if marker in parts:
                 idx = parts.index(marker)
                 return "/".join(parts[idx:])
