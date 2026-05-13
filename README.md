@@ -7,9 +7,9 @@
     |   Wooden Log Loom    |
      \____________________/
            ||   ||   ||
-          /||\ /||\ /||\     ← Warp Threads (Code)
+          /||\ /||\ /||\     ← Warp (Code)
          / ||  ||  ||  ||\
-        ==================   ← Log Beam
+        ==================   ← Weft (Log)
              ll:abc123def
        "The Log becomes the Loom"
 ```
