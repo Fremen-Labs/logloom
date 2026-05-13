@@ -1,0 +1,17 @@
+# LogLoom ignore file
+# Add patterns to exclude from scanning (similar to .gitignore)
+
+# Tests and fixtures
+**/tests/**
+**/fixtures/**
+
+# Virtual envs
+.venv/
+venv/
+env/
+
+# Build artifacts
+build/
+dist/
+*.egg-info/
+logloom-graph.json
