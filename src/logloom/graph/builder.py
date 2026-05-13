@@ -22,9 +22,18 @@ class GraphBuilder:
                     sites.extend(regex_fallback_scan(py_file))
                     all_sites.extend(sites)
 
+        # Deduplicate sites by (file_path, line) giving priority to AST scanner
+        unique_sites = {}
+        # We append AST sites first, then regex. So we reverse the iteration or just check if not in dict.
+        # Actually all_sites has AST first, then regex.
+        for site in all_sites:
+            key = (site.file_path, site.line)
+            if key not in unique_sites:
+                unique_sites[key] = site
+
         hasher = NodeHasher()
         nodes = {}
-        for site in all_sites:
+        for site in unique_sites.values():
             # Phase 1: lexical parent scope
             parent_scope = site.lexical_context.get("enclosing_function", "") if site.lexical_context else ""
             
@@ -37,9 +46,8 @@ class GraphBuilder:
                 parent_scope=parent_scope
             )
             
-            # Extract basic tags
             semantic_tags = []
-            if "error" in site.log_level.lower() or "critical" in site.log_level.lower():
+            if site.log_level.lower() in ("error", "critical", "exception"):
                 semantic_tags.append("error")
                 
             # Redaction

@@ -65,25 +65,44 @@ class PythonScanner:
         return sites
 
     def _extract_string(self, node, source: bytes) -> str:
-        """Extract literal text from a string, f-string, or binary expression node."""
+        """Robustly extract a message template from a string, f-string, or binary concat."""
         if node.type == "string":
-            # Just extract the text and strip quotes
+            # For standard strings, we can just strip quotes.
+            # But tree-sitter parses f-strings as a string containing:
+            # string_start, string_content, interpolation, string_end
+            parts = []
+            has_interpolation = False
+            for child in node.children:
+                if child.type == "string_content":
+                    parts.append(child.text.decode("utf-8"))
+                elif child.type == "interpolation":
+                    parts.append("{}")
+                    has_interpolation = True
+            
+            if has_interpolation or parts:
+                return "".join(parts)
+            
+            # Fallback for plain strings without child nodes in older parser versions
             text = node.text.decode("utf-8")
             if text.startswith('f"') or text.startswith("f'") or text.startswith('r"') or text.startswith("r'"):
                 return text[2:-1]
             elif text.startswith('"') or text.startswith("'"):
                 return text[1:-1]
             return text
-        
-        # If it's a binary expression like "a" + "b", return raw source
-        # If it's an f-string without quote nodes (sometimes represented differently in tree-sitter)
+
+        if node.type == "binary_operator":
+            # Very simplistic concat handling: left + right
+            left = node.child_by_field_name("left")
+            right = node.child_by_field_name("right")
+            if left and right:
+                return self._extract_string(left, source) + self._extract_string(right, source)
+
+        # Fallback to raw text, stripping common quotes just in case
         text = node.text.decode("utf-8")
-        # Quick strip of common string wrapper quotes
         if text.startswith('f"') or text.startswith("f'"):
             return text[2:-1]
         elif text.startswith('"') or text.startswith("'"):
             return text[1:-1]
-        
         return text
 
     def _get_lexical_context(self, node):
