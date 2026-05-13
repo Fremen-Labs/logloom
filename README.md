@@ -25,7 +25,7 @@ Build-time AST magic meets runtime enlightenment — perfect for humans, agentic
 Modern logs are like 90s AOL chat: humans can read them, but good luck getting an AI to understand the *intent* behind the code.  
 
 LogLoom fixes that by:
-- Scanning your source **at build time** across languages (Python, Go, TypeScript/JavaScript — no runtime tax)
+- Scanning your source **at build time** across languages like Python, Go, TypeScript/JavaScript with no runtime tax
 - Building a stable semantic knowledge graph
 - Injecting tiny, permanent `ll:` node references into every log line
 - Shipping directly to Elasticsearch and OpenTelemetry with native bridges
@@ -91,11 +91,11 @@ Now your Elastic queries and AI agents can say things like:
 *"Show me every failure in the auth retry path in the last hour"*  
 and actually get meaningful answers.
 
-## Core Features (The Specs)
+## Core Features
 
 - **Zero runtime overhead** when graph is missing (graceful fallback)
 - **Stable node IDs** that survive refactors
-- **Multi-language Scanners**: Production-grade Tree-sitter AST parsing for Python, Go (zerolog, zap, slog), and TypeScript/JavaScript (winston, pino, console).
+- **Multi-language Scanners**: A nifty Tree-sitter AST parsing for Python, Go  like zerolog, zap, slog, and TypeScript/JavaScript like winston, pino, console.
 - **Native OpenTelemetry Bridge**: Plug-and-play like a Game Boy cartridge. Slap it in and your spans are magically annotated.
 - **Elasticsearch Shipper & Mappings**: Auto-generates ECS-compliant component templates and ships your graph directly into Elasticsearch via `_bulk`.
 - **GitHub Action Native**: Just `uses: fremenlabs/logloom@v0.3.0` in your CI pipeline.
@@ -108,7 +108,7 @@ and actually get meaningful answers.
 # For normal runtime use
 pip install logloom
 
-# For building graphs (includes Tree-sitter binaries)
+# For building graphs includes Tree-sitter binaries
 pip install "logloom[build]"
 
 # For Elastic and OTEL ecosystem power-ups
