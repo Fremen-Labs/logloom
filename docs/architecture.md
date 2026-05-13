@@ -34,10 +34,19 @@ graph LR
 - Graceful degradation if graph missing
 - Enriched events with `ll_node`, tags, etc.
 
-## Milestone 2 Additions
-- Automatic semantic tags
-- `logloom graph stats/show`
-- `logloom lint`
-- Enhanced lexical context
+## Milestone 2 Intelligence Layer Additions
+
+Milestone 2 upgraded the build-time graph with a post-processing intelligence layer:
+
+- **Semantic Tag Engine**: Pure function (`infer_tags`) that auto-detects 13 domain categories (`auth`, `database`, `payment`, `retry`, `lifecycle`, etc.) from function names, module paths, decorators, message content, and log levels.
+- **Inter-Function Call-Graph Edges**: Tree-sitter AST walker builds a full `caller → {callees}` map, populating `call_parents` and `call_children` on graph nodes.
+- **Git Metadata**: Automatically embeds the local git repository's `commit_sha` and `branch` into graph metadata.
+- **Graph Explorer CLI**:
+  - `logloom graph stats` — High-level insights, tag/level distributions.
+  - `logloom graph show` — Tree representation of nodes mapped to modules/functions.
+  - `logloom graph find` — Search node messages and locations.
+- **Graph Validation CLI**:
+  - `logloom lint` — Checks source files against the graph to detect untracked or stale log sites (supports `--strict` for CI gating).
+  - `logloom diff` — Detects added/removed/moved/modified graph nodes across two versions.
 
 See the code in `src/logloom/` for implementation details.

@@ -90,7 +90,7 @@ Now your Elastic queries and AI agents can say things like:
 *"Show me every failure in the auth retry path in the last hour"*  
 and actually get meaningful answers.
 
-## Features (No Marketing Fluff)
+## Core Features
 
 - **Zero runtime overhead** when graph is missing (graceful fallback)
 - **Stable node IDs** that survive refactors
@@ -109,9 +109,34 @@ pip install logloom
 pip install "logloom[build]"
 ```
 
+## Milestone 2 Intelligence
+
+- **Semantic tag inference** — auto-detects `auth`, `error`, `db`, etc.
+- **Inter-function call-graph** — tracks caller/callee relationships
+- **`logloom graph stats`** — quick insights into your graph:
+
+```text
+╭───────────────────────────────╮
+│ logloom-project  •  schema v1 │
+╰── Built 2026-05-13T16:01:30 ──╯
+          Graph Overview           
+┌──────────────────┬──────────────┐
+│ Log sites        │           16 │
+│ Functions        │            6 │
+│ Call-graph edges │           23 │
+│ Commit           │ bba435c380b4 │
+└──────────────────┴──────────────┘
+```
+
+- **`logloom graph show`** — explore the graph as a rich tree
+- **`logloom lint`** — catches untracked log sites
+- **`logloom diff`** — detect graph regressions in CI
+
+Run `logloom --help` to explore!
+
 ## Next Level Stuff
 
-See [ARCHITECTURE.md](ARCHITECTURE.md) for the full technical deep dive and [roadmap](https://github.com/Fremen-Labs/logloom/issues) for what’s coming (semantic tags, `logloom graph` explorer, linting, etc.).
+See [Architecture Guide](docs/architecture.md) for the full technical deep dive and [roadmap](https://github.com/Fremen-Labs/logloom/issues) for what’s coming next.
 
 ---
 
