@@ -1,5 +1,19 @@
 # LogLoom
 
+```
+      ____________________
+     /                    \
+    |     L O G L O O M    |
+    |   Wooden Log Loom    |
+     \____________________/
+           ||   ||   ||
+          /||\ /||\ /||\     ← Warp Threads (Code)
+         / ||  ||  ||  ||\
+        ==================   ← Log Beam
+             ll:abc123def
+       "The Log becomes the Loom"
+```
+
 **Weave your codebase into every log line.**  
 *Like a 90s BBS sysop who actually knew where the packets were dropping.*
 
