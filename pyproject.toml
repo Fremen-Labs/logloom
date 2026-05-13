@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "logloom"
-version = "0.1.0"
+version = "0.3.0"
 description = "Weave your codebase into every log line. AST-powered semantic provenance for logs."
 readme = "README.md"
 license = {text = "MIT"}
@@ -21,6 +21,22 @@ build = [
     "tree-sitter-python>=0.23",
     "click>=8.0",
     "rich>=13.0",
+]
+go = [
+    "tree-sitter>=0.23",
+    "tree-sitter-go>=0.23",
+]
+typescript = [
+    "tree-sitter>=0.23",
+    "tree-sitter-typescript>=0.23",
+    "tree-sitter-javascript>=0.23",
+]
+elasticsearch = [
+    "elasticsearch>=8.0",
+]
+otel = [
+    "opentelemetry-api>=1.20",
+    "opentelemetry-sdk>=1.20",
 ]
 dev = [
     "pytest>=8.0",

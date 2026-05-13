@@ -6,6 +6,12 @@ from .hasher import NodeHasher
 from ..scanner.python_scanner import PythonScanner
 from ..scanner.regex_fallback import regex_fallback_scan
 
+# File extensions that each scanner handles
+_PYTHON_EXTS = {".py"}
+_GO_EXTS = {".go"}
+_TS_EXTS = {".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs"}
+
+
 class GraphBuilder:
     def build(
         self,
@@ -15,6 +21,7 @@ class GraphBuilder:
         enable_tags: bool = True,
         enable_call_graph: bool = True,
         enable_git: bool = True,
+        languages: Optional[List[str]] = None,
     ) -> LogLoomGraph:
         """Build the LogLoom knowledge graph from source files.
 
@@ -25,20 +32,53 @@ class GraphBuilder:
             enable_tags: Run the semantic tag inference pass (Issue #14).
             enable_call_graph: Run the call-graph edge resolver (Issue #15).
             enable_git: Embed git metadata (Issue #16).
+            languages: List of language codes to scan. Default: ["python"].
+                       Options: "python", "go", "typescript".
         """
-        scanner = PythonScanner()
+        if languages is None:
+            languages = ["python"]
+
         all_sites = []
-        
+
+        # ── Collect files ─────────────────────────────────────────────────
+        all_files = []
         for path in source_paths:
             if path.is_file():
-                sites = scanner.scan_file(path)
-                sites.extend(regex_fallback_scan(path))
-                all_sites.extend(sites)
+                all_files.append(path)
             elif path.is_dir():
-                for py_file in path.rglob("*.py"):
-                    sites = scanner.scan_file(py_file)
-                    sites.extend(regex_fallback_scan(py_file))
-                    all_sites.extend(sites)
+                all_files.extend(path.rglob("*"))
+
+        # ── Python scanning ───────────────────────────────────────────────
+        if "python" in languages:
+            scanner = PythonScanner()
+            for f in all_files:
+                if f.suffix in _PYTHON_EXTS:
+                    all_sites.extend(scanner.scan_file(f))
+                    all_sites.extend(regex_fallback_scan(f))
+
+        # ── Go scanning (Issue #23) ───────────────────────────────────────
+        if "go" in languages:
+            try:
+                from ..scanner.go_scanner import GoScanner
+                go_scanner = GoScanner()
+                if go_scanner.available:
+                    for f in all_files:
+                        if f.suffix in _GO_EXTS:
+                            all_sites.extend(go_scanner.scan_file(f))
+            except ImportError:
+                pass  # tree-sitter-go not installed
+
+        # ── TypeScript/JavaScript scanning (Issue #24) ────────────────────
+        if "typescript" in languages:
+            try:
+                from ..scanner.ts_scanner import TypeScriptScanner
+                ts_scanner = TypeScriptScanner()
+                if ts_scanner.available:
+                    for f in all_files:
+                        if f.suffix in _TS_EXTS:
+                            all_sites.extend(ts_scanner.scan_file(f))
+            except ImportError:
+                pass  # tree-sitter-typescript not installed
 
         # Deduplicate sites by (file_path, line) giving priority to AST scanner
         unique_sites = {}
@@ -52,7 +92,7 @@ class GraphBuilder:
         for site in unique_sites.values():
             # Phase 1: lexical parent scope
             parent_scope = site.lexical_context.get("enclosing_function", "") if site.lexical_context else ""
-            
+
             node_id = hasher.generate_node_id(
                 module_path=site.module_path,
                 class_name=site.class_name,
@@ -61,12 +101,12 @@ class GraphBuilder:
                 file_path=site.file_path,
                 parent_scope=parent_scope
             )
-            
+
             # Basic semantic tags from level (the tagger will enrich further)
             semantic_tags = []
             if site.log_level.lower() in ("error", "critical", "exception"):
                 semantic_tags.append("error")
-                
+
             # Redaction
             msg_template = site.message_template
             if redact_patterns:

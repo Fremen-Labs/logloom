@@ -1,0 +1,139 @@
+name: 'LogLoom Build'
+description: 'Build the LogLoom semantic knowledge graph from your source code. AST-powered log provenance for CI/CD.'
+author: 'Fremen Labs'
+
+branding:
+  icon: 'activity'
+  color: 'purple'
+
+inputs:
+  source:
+    description: 'Source directory or file to scan'
+    required: false
+    default: '.'
+  output:
+    description: 'Output graph path'
+    required: false
+    default: 'logloom-graph.json'
+  languages:
+    description: 'Comma-separated languages to scan (python, go, typescript)'
+    required: false
+    default: 'python'
+  redact-patterns:
+    description: 'Comma-separated sensitive terms to redact'
+    required: false
+    default: ''
+  enable-git:
+    description: 'Embed git metadata (commit SHA, branch)'
+    required: false
+    default: 'true'
+  enable-tags:
+    description: 'Run semantic tag auto-inference'
+    required: false
+    default: 'true'
+  enable-call-graph:
+    description: 'Resolve inter-function call-graph edges'
+    required: false
+    default: 'true'
+  python-version:
+    description: 'Python version to use'
+    required: false
+    default: '3.12'
+  fail-on-lint:
+    description: 'Fail the action if untracked log sites are detected'
+    required: false
+    default: 'false'
+  upload-artifact:
+    description: 'Upload the graph as a GitHub Actions artifact'
+    required: false
+    default: 'true'
+  artifact-name:
+    description: 'Name for the uploaded artifact'
+    required: false
+    default: 'logloom-graph'
+
+outputs:
+  node-count:
+    description: 'Number of log sites discovered'
+    value: ${{ steps.build.outputs.node_count }}
+  graph-path:
+    description: 'Path to the generated graph file'
+    value: ${{ steps.build.outputs.graph_path }}
+  lint-status:
+    description: 'Lint result: "clean" or "dirty"'
+    value: ${{ steps.lint.outputs.status }}
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: ${{ inputs.python-version }}
+
+    - name: Install LogLoom
+      shell: bash
+      run: |
+        pip install --quiet "logloom[build]"
+        # Install language-specific grammars
+        LANGS="${{ inputs.languages }}"
+        if [[ "$LANGS" == *"go"* ]]; then
+          pip install --quiet tree-sitter-go
+        fi
+        if [[ "$LANGS" == *"typescript"* ]]; then
+          pip install --quiet tree-sitter-typescript tree-sitter-javascript
+        fi
+
+    - name: Build graph
+      id: build
+      shell: bash
+      run: |
+        ARGS="--source ${{ inputs.source }}"
+        ARGS="$ARGS --output ${{ inputs.output }}"
+        ARGS="$ARGS --languages ${{ inputs.languages }}"
+
+        if [ "${{ inputs.enable-git }}" = "false" ]; then
+          ARGS="$ARGS --no-git"
+        fi
+        if [ "${{ inputs.enable-tags }}" = "false" ]; then
+          ARGS="$ARGS --no-tags"
+        fi
+        if [ "${{ inputs.enable-call-graph }}" = "false" ]; then
+          ARGS="$ARGS --no-call-graph"
+        fi
+        if [ -n "${{ inputs.redact-patterns }}" ]; then
+          ARGS="$ARGS --redact-patterns '${{ inputs.redact-patterns }}'"
+        fi
+
+        OUTPUT=$(logloom build $ARGS --verbose 2>&1)
+        echo "$OUTPUT"
+
+        # Extract node count from output
+        NODE_COUNT=$(echo "$OUTPUT" | grep -oP '\d+ nodes' | grep -oP '\d+' || echo "0")
+        echo "node_count=$NODE_COUNT" >> "$GITHUB_OUTPUT"
+        echo "graph_path=${{ inputs.output }}" >> "$GITHUB_OUTPUT"
+
+    - name: Lint (optional)
+      id: lint
+      if: inputs.fail-on-lint == 'true'
+      shell: bash
+      run: |
+        if logloom lint --source ${{ inputs.source }} --graph-path ${{ inputs.output }} --strict; then
+          echo "status=clean" >> "$GITHUB_OUTPUT"
+        else
+          echo "status=dirty" >> "$GITHUB_OUTPUT"
+          echo "::error::LogLoom lint detected untracked log sites. Run 'logloom build' locally to update."
+          exit 1
+        fi
+
+    - name: Graph stats
+      shell: bash
+      run: logloom graph stats --graph-path ${{ inputs.output }}
+
+    - name: Upload artifact
+      if: inputs.upload-artifact == 'true'
+      uses: actions/upload-artifact@v4
+      with:
+        name: ${{ inputs.artifact-name }}
+        path: ${{ inputs.output }}
+        retention-days: 30

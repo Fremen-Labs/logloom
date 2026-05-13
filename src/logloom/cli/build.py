@@ -11,7 +11,8 @@ from ..graph.store import save_graph
 @click.option("--git/--no-git", default=True, help="Embed git metadata (commit SHA, branch).")
 @click.option("--tags/--no-tags", default=True, help="Run semantic tag auto-inference.")
 @click.option("--call-graph/--no-call-graph", default=True, help="Resolve inter-function call-graph edges.")
-def build(source: str, output: str, verbose: bool, redact_patterns: str, git: bool, tags: bool, call_graph: bool):
+@click.option("--languages", default="python", help="Comma-separated languages: python,go,typescript.")
+def build(source: str, output: str, verbose: bool, redact_patterns: str, git: bool, tags: bool, call_graph: bool, languages: str):
     """Build the LogLoom knowledge graph from source code."""
     source_path = Path(source)
     if not source_path.exists():
@@ -20,13 +21,15 @@ def build(source: str, output: str, verbose: bool, redact_patterns: str, git: bo
 
     builder = GraphBuilder()
     patterns = [p.strip() for p in redact_patterns.split(",")] if redact_patterns else []
-    
+    lang_list = [l.strip() for l in languages.split(",") if l.strip()]
+
     graph = builder.build(
         [source_path],
         redact_patterns=patterns,
         enable_tags=tags,
         enable_call_graph=call_graph,
         enable_git=git,
+        languages=lang_list,
     )
 
     if verbose:
