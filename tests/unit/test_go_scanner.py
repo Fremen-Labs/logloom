@@ -160,3 +160,139 @@ func worker(jobs <-chan int) {
     # At least one should be in a loop
     loop_sites = [s for s in sites if s.lexical_context.get("in_loop")]
     assert len(loop_sites) >= 1
+
+
+# ── Production hardening tests ────────────────────────────────────────────────
+
+def test_go_scanner_zap_field_constructor_excluded(go_scanner, tmp_path: Path):
+    """zap.Error(err) should NOT be captured as a log call; only logger.Error() should."""
+    f = tmp_path / "zap_field.go"
+    f.write_text('''
+package main
+import (
+    "fmt"
+    "go.uber.org/zap"
+)
+func zapField(logger *zap.Logger) {
+    logger.Error("operation failed", zap.Error(fmt.Errorf("timeout")))
+    logger.Info("user created", zap.String("uid", "u-123"))
+}
+''')
+    sites = go_scanner.scan_file(f)
+    assert len(sites) == 2
+
+    msgs = {s.message_template for s in sites}
+    assert "operation failed" in msgs, f"Expected 'operation failed', got {msgs}"
+    assert "user created" in msgs
+    # zap.Error's "timeout" and zap.String's "uid" should NOT appear
+    assert "timeout" not in msgs
+    assert "uid" not in msgs
+
+
+def test_go_scanner_string_concatenation(go_scanner, tmp_path: Path):
+    """String concatenation (binary_expression +) should be flattened."""
+    f = tmp_path / "concat.go"
+    f.write_text('''
+package main
+import "log"
+func concat() {
+    log.Println("prefix: " + someVar + " suffix")
+}
+''')
+    sites = go_scanner.scan_file(f)
+    assert len(sites) == 1
+    assert sites[0].message_template == "prefix: {} suffix"
+
+
+def test_go_scanner_multiline_concat(go_scanner, tmp_path: Path):
+    """Multi-line string concatenation should be joined into a single message."""
+    f = tmp_path / "multiline.go"
+    f.write_text('''
+package main
+import "log/slog"
+func multi() {
+    slog.Info("this is a long " +
+        "message that spans " +
+        "multiple lines")
+}
+''')
+    sites = go_scanner.scan_file(f)
+    assert len(sites) == 1
+    assert sites[0].message_template == "this is a long message that spans multiple lines"
+
+
+def test_go_scanner_switch_context(go_scanner, tmp_path: Path):
+    """Log calls inside switch/case should have in_switch context."""
+    f = tmp_path / "switch.go"
+    f.write_text('''
+package main
+import "log/slog"
+func sw(level string) {
+    switch level {
+    case "debug":
+        slog.Debug("debug level")
+    case "info":
+        slog.Info("info level")
+    default:
+        slog.Warn("unknown level")
+    }
+}
+''')
+    sites = go_scanner.scan_file(f)
+    assert len(sites) == 3
+    for s in sites:
+        assert s.lexical_context.get("in_switch"), \
+            f"L{s.line} should have in_switch=True"
+
+
+def test_go_scanner_closure_context(go_scanner, tmp_path: Path):
+    """Anonymous closures should detect in_closure and inherit outer function name."""
+    f = tmp_path / "closure.go"
+    f.write_text('''
+package main
+import "log"
+func outer() {
+    handler := func() {
+        log.Println("inside closure")
+    }
+    handler()
+    go func() {
+        log.Println("goroutine closure")
+    }()
+}
+''')
+    sites = go_scanner.scan_file(f)
+    assert len(sites) >= 2
+
+    # The goroutine one should have both in_goroutine and in_closure
+    goroutine_sites = [s for s in sites if s.lexical_context.get("in_goroutine")]
+    assert len(goroutine_sites) >= 1
+
+    # All sites should resolve to the outer function or the assigned var name
+    for s in sites:
+        assert s.function_name != "<module>", \
+            f"Expected named function, got <module> at L{s.line}"
+
+
+def test_go_scanner_fmt_sprintf_extraction(go_scanner, tmp_path: Path):
+    """fmt.Sprintf/fmt.Errorf as log arguments should have their format string extracted."""
+    f = tmp_path / "sprintf.go"
+    f.write_text('''
+package main
+import (
+    "log"
+    "fmt"
+    "github.com/sirupsen/logrus"
+)
+func fmtCases() {
+    log.Println(fmt.Sprintf("processed %d records in %v", count, elapsed))
+    logrus.Error(fmt.Errorf("connection to %s failed", host))
+}
+''')
+    sites = go_scanner.scan_file(f)
+    assert len(sites) == 2
+
+    msgs = [s.message_template for s in sites]
+    assert "processed {} records in {}" in msgs
+    assert "connection to {} failed" in msgs
+

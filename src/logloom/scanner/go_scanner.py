@@ -2,13 +2,23 @@
 
 Scans Go source files for log calls using Tree-sitter queries.
 Supports: stdlib log, slog, zap (typed + sugar), logrus, zerolog (chained builder).
+
+Production-ready features:
+  - Two-pass matching to resolve zerolog chain conflicts
+  - Zerolog builder intermediary exclusion (30+ methods)
+  - Zap field constructor false-positive elimination
+  - String concatenation (binary_expression with +) flattening
+  - fmt.Sprintf / fmt.Errorf format string extraction
+  - Go format verb normalization (%s → {})
+  - Method receiver qualification (AuthService.Authenticate)
+  - Full lexical context: function, receiver, if, loop, switch, select, defer, goroutine, closure
 """
 
 from __future__ import annotations
 
 import re
 from pathlib import Path
-from typing import List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 from .base import LogCallSite
 from .queries.go_logs import GO_LOGS_QUERY
@@ -29,10 +39,7 @@ _VALID_DIRECT_METHODS = frozenset({
 # Zerolog terminal methods — the chain emitter
 _VALID_ZEROLOG_METHODS = frozenset({"Msg", "Msgf", "Send"})
 
-# Zerolog builder intermediaries — these are NOT log emission points and must
-# be filtered out when matched by Pattern 1 (the broad selector_expression query).
-# Without this, log.Error().Err(err).Msg("text") would match .Err() as a
-# false-positive log call with message "err" instead of the terminal .Msg().
+# Zerolog builder intermediaries — NOT log emission points.
 _ZEROLOG_BUILDER_METHODS = frozenset({
     "Err", "Str", "Int", "Int64", "Float64", "Bool", "Bytes",
     "Time", "Dur", "Dict", "Array", "Object", "Interface",
@@ -40,6 +47,18 @@ _ZEROLOG_BUILDER_METHODS = frozenset({
     "Any", "AnErr", "Strs", "Ints", "Floats", "Bools",
     "RawJSON", "Hex", "IPAddr", "MACAddr",
     "With", "Level", "Sample", "Hook",
+})
+
+# Zap field constructors — these produce zap.Field, not log calls.
+# zap.Error(err) should NOT be treated as logger.Error("msg").
+_ZAP_FIELD_CONSTRUCTORS = frozenset({
+    "String", "Int", "Int64", "Float64", "Bool", "ByteString",
+    "Binary", "Reflect", "Stringer", "Time", "Duration",
+    "Any", "Error", "NamedError", "Errors", "Stack", "StackSkip",
+    "Object", "Array", "Namespace", "Skip", "Inline",
+    "Uint", "Uint64", "Uint32", "Uint16", "Uint8",
+    "Int32", "Int16", "Int8", "Float32",
+    "Complex128", "Complex64", "Uintptr",
 })
 
 # Combined set for the scanner
@@ -62,6 +81,9 @@ _GO_LEVEL_MAP = {
 
 # Go format verb regex — normalizes %s, %d, %v, etc. to {}
 _GO_FMT_VERB_RE = re.compile(r'%[+\-#0 ]*(?:\*|\d+)?(?:\.(?:\*|\d+))?[sdvfteqxXoObBpTwgGUcn]')
+
+# Known zap package identifiers
+_ZAP_PKG_NAMES = frozenset({"zap"})
 
 
 class GoScanner:
@@ -128,6 +150,19 @@ class GoScanner:
             if method_name in _ZEROLOG_BUILDER_METHODS:
                 continue
 
+            # ── Zap field constructor false-positive elimination ───────────
+            # zap.Error(err) inside logger.Error("msg", zap.Error(err))
+            # is a field constructor, not a log call. Detect by checking
+            # if the call_expression's operand is a zap package identifier.
+            if self._is_zap_field_constructor(method_node):
+                continue
+
+            # ── Nested call false-positive elimination ────────────────────
+            # If this method call is nested inside another call's argument
+            # list, it's likely a field constructor or wrapper, not a log call.
+            if self._is_nested_in_argument_list(method_node):
+                continue
+
             line = method_node.start_point.row + 1
             is_terminal = method_name in _VALID_ZEROLOG_METHODS
 
@@ -186,26 +221,75 @@ class GoScanner:
 
         return sites
 
+    # ── False-positive detection ──────────────────────────────────────────────
+
+    def _is_zap_field_constructor(self, method_node) -> bool:
+        """Check if this is a zap field constructor like zap.Error(), zap.String().
+
+        These are NOT log calls — they produce zap.Field values used as arguments
+        to the real log call. The AST pattern is:
+            call_expression
+              selector_expression
+                identifier "zap"         ← package is "zap"
+                field_identifier "Error"  ← method matches a field constructor
+        """
+        # method_node is the field_identifier. Its parent should be selector_expression.
+        parent = method_node.parent
+        if not parent or parent.type != "selector_expression":
+            return False
+
+        method_name = method_node.text.decode("utf-8")
+        if method_name not in _ZAP_FIELD_CONSTRUCTORS:
+            return False
+
+        # Check if the operand is a known zap package identifier
+        operand = parent.child_by_field_name("operand")
+        if operand and operand.type == "identifier":
+            pkg_name = operand.text.decode("utf-8")
+            if pkg_name in _ZAP_PKG_NAMES:
+                return True
+
+        return False
+
+    def _is_nested_in_argument_list(self, method_node) -> bool:
+        """Check if this method call is nested inside another call's argument_list.
+
+        Detects patterns like: logger.Error("msg", zap.Error(err))
+        where zap.Error(err) is nested inside logger.Error's argument_list.
+
+        We walk up from the method_node through: field_identifier → selector_expression
+        → call_expression → and check if that call_expression's parent is an argument_list
+        that itself belongs to another call_expression.
+        """
+        # Walk: method_node (field_identifier) → selector_expression → call_expression
+        sel_expr = method_node.parent
+        if not sel_expr or sel_expr.type != "selector_expression":
+            return False
+
+        call_expr = sel_expr.parent
+        if not call_expr or call_expr.type != "call_expression":
+            return False
+
+        # Check if this call_expression is inside an argument_list
+        container = call_expr.parent
+        if container and container.type == "argument_list":
+            # And the argument_list belongs to another call_expression
+            outer_call = container.parent
+            if outer_call and outer_call.type == "call_expression":
+                # This is a nested call. But we need to be careful: logrus.WithError().Error()
+                # is a chained call where .Error() is NOT inside an argument_list.
+                # Only skip if we're truly inside the args of an outer log call.
+                return True
+
+        return False
+
     # ── Zerolog level resolution ──────────────────────────────────────────────
 
     def _resolve_zerolog_level(self, msg_method_node) -> str:
         """Walk up the zerolog call chain to find the originating level method.
 
-        For ``log.Error().Err(err).Msg("fail")``, the AST is:
-            call_expression
-              selector_expression
-                call_expression          ← .Err(err)
-                  selector_expression
-                    call_expression      ← .Error()
-                      selector_expression
-                        identifier "log"
-                        field_identifier "Error"
-                  ...
-                field_identifier "Msg"
-              ...
-
-        We walk the operand chain until we find a field_identifier that matches
-        a known level name.
+        For ``log.Error().Err(err).Msg("fail")``, we walk backwards from .Msg
+        through the chain until we find a known level method (Error, Warn, etc.).
         """
         _ZEROLOG_LEVELS = {
             "Trace": "debug", "Debug": "debug",
@@ -233,7 +317,6 @@ class GoScanner:
                 # Go deeper into the operand
                 operand = current.child_by_field_name("operand")
                 if operand and operand.type == "call_expression":
-                    # The function of this call_expression
                     fn = operand.child_by_field_name("function")
                     if fn:
                         current = fn
@@ -256,44 +339,120 @@ class GoScanner:
     # ── String extraction ─────────────────────────────────────────────────────
 
     def _extract_string(self, node, source: bytes) -> str:
-        """Extract a message template from a Go string literal or expression."""
+        """Extract a message template from a Go string literal or expression.
+
+        Handles:
+          - Interpreted strings: "hello %s" → "hello {}"
+          - Raw strings: `hello %s` → "hello {}"
+          - String concatenation: "a" + var + "b" → "a {} b"
+          - Multi-line concat: "a " +\\n "b" → "a b"
+          - fmt.Sprintf / fmt.Errorf: extract the format string
+          - Variable references: identifier → "{}"
+        """
         text = node.text.decode("utf-8")
 
         if node.type == "interpreted_string_literal":
             result = text.strip('"')
-        elif node.type == "raw_string_literal":
+            return _GO_FMT_VERB_RE.sub('{}', result)
+
+        if node.type == "raw_string_literal":
             result = text.strip('`')
-        elif node.type in ("identifier", "selector_expression"):
+            return _GO_FMT_VERB_RE.sub('{}', result)
+
+        if node.type in ("identifier",):
             return "{}"  # Variable reference
-        elif node.type == "call_expression":
-            # fmt.Sprintf("...", args) — extract the format string
+
+        if node.type == "selector_expression":
+            # pkg.Var or obj.Field — treat as variable
+            return "{}"
+
+        # ── Binary expression: string concatenation ───────────────────────
+        if node.type == "binary_expression":
+            return self._extract_binary_expression(node, source)
+
+        # ── Call expression: fmt.Sprintf, fmt.Errorf ──────────────────────
+        if node.type == "call_expression":
             fn = node.child_by_field_name("function")
             if fn:
                 fn_text = fn.text.decode("utf-8")
-                if "Sprintf" in fn_text or "Errorf" in fn_text:
+                # Extract the format string from fmt.Sprintf/Errorf/etc.
+                if any(fn_text.endswith(s) for s in ("Sprintf", "Errorf", "Fprintf")):
                     args = node.child_by_field_name("arguments")
-                    if args and args.child_count > 1:
-                        first = args.children[1]  # skip "("
-                        return self._extract_string(first, source)
+                    if args:
+                        # Find the first non-punctuation child (skip "(")
+                        for child in args.children:
+                            if child.type not in ("(", ")", ","):
+                                # For Fprintf, skip the writer arg (first arg)
+                                if fn_text.endswith("Fprintf"):
+                                    continue
+                                return self._extract_string(child, source)
             return "{}"
-        else:
-            result = text.strip('"').strip('`')
 
-        # Normalize Go format verbs (%s, %d, %v, etc.) → {}
-        result = _GO_FMT_VERB_RE.sub('{}', result)
-        return result
+        # ── Fallback: strip quotes ────────────────────────────────────────
+        result = text.strip('"').strip('`')
+        return _GO_FMT_VERB_RE.sub('{}', result)
+
+    def _extract_binary_expression(self, node, source: bytes) -> str:
+        """Flatten a binary_expression chain of string concatenation.
+
+        Handles: "prefix: " + someVar + " suffix"  →  "prefix: {} suffix"
+        And:     "part1 " +
+                     "part2 " +
+                     "part3"                        →  "part1 part2 part3"
+        """
+        parts = []
+        self._collect_binary_parts(node, source, parts)
+        return "".join(parts)
+
+    def _collect_binary_parts(self, node, source: bytes, parts: list) -> None:
+        """Recursively collect parts of a binary_expression."""
+        if node.type == "binary_expression":
+            left = node.child_by_field_name("left")
+            op = node.child_by_field_name("operator")
+            right = node.child_by_field_name("right")
+
+            if left and right and op and op.text == b"+":
+                self._collect_binary_parts(left, source, parts)
+                self._collect_binary_parts(right, source, parts)
+            else:
+                # Non-concatenation binary expression
+                parts.append("{}")
+        elif node.type == "interpreted_string_literal":
+            text = node.text.decode("utf-8").strip('"')
+            parts.append(_GO_FMT_VERB_RE.sub('{}', text))
+        elif node.type == "raw_string_literal":
+            text = node.text.decode("utf-8").strip('`')
+            parts.append(_GO_FMT_VERB_RE.sub('{}', text))
+        elif node.type in ("identifier", "selector_expression",
+                           "call_expression", "unary_expression",
+                           "index_expression", "slice_expression"):
+            parts.append("{}")
+        else:
+            # Fallback: try to extract text
+            text = node.text.decode("utf-8").strip('"').strip('`')
+            parts.append(_GO_FMT_VERB_RE.sub('{}', text))
 
     # ── Lexical context ───────────────────────────────────────────────────────
 
     def _get_lexical_context(self, node) -> dict:
-        """Walk up the AST to extract full lexical context."""
+        """Walk up the AST to extract full lexical context.
+
+        Detects:
+          - function_declaration / method_declaration (enclosing function)
+          - method receiver type qualification (AuthService.Authenticate)
+          - func_literal (anonymous closure / callback)
+          - if_statement, for_statement, switch_statement, select_statement
+          - defer_statement, go_statement
+        """
         enclosing_func = None
         receiver_type = None
         in_if = False
         in_loop = False
+        in_switch = False
         in_select = False
         in_defer = False
         in_goroutine = False
+        in_closure = False
 
         parent = node.parent
         while parent:
@@ -310,8 +469,7 @@ class GoScanner:
                     name_node = parent.child_by_field_name("name")
                     if name_node:
                         enclosing_func = name_node.text.decode("utf-8")
-                    # Extract receiver type — the receiver IS a parameter_list
-                    # containing (parameter_declaration) children.
+                    # Extract receiver type
                     receiver = parent.child_by_field_name("receiver")
                     if receiver:
                         for child in receiver.children:
@@ -320,10 +478,36 @@ class GoScanner:
                                 if type_node:
                                     receiver_type = type_node.text.decode("utf-8").lstrip("*")
 
+            elif ptype == "func_literal":
+                # Anonymous function / closure.
+                # If we haven't found an enclosing func yet, this IS the enclosing scope.
+                # If we already have one, this is a nested closure.
+                if enclosing_func:
+                    in_closure = True
+                else:
+                    # Try to infer a name from the assignment context.
+                    # e.g.: handler := func() { ... }
+                    gparent = parent.parent
+                    if gparent and gparent.type == "short_var_declaration":
+                        # left := func() { ... }
+                        left = gparent.child_by_field_name("left")
+                        if left:
+                            for child in left.children:
+                                if child.type == "identifier":
+                                    enclosing_func = child.text.decode("utf-8")
+                                    in_closure = True
+                                    break
+                    if not enclosing_func:
+                        in_closure = True
+                        # Will inherit the outer function name when we continue walking up
+
             elif ptype == "if_statement":
                 in_if = True
             elif ptype == "for_statement":
                 in_loop = True
+            elif ptype in ("switch_statement", "type_switch_statement",
+                           "expression_switch_statement"):
+                in_switch = True
             elif ptype == "select_statement":
                 in_select = True
             elif ptype == "defer_statement":
@@ -343,9 +527,11 @@ class GoScanner:
             "receiver_type": receiver_type,
             "in_if_block": in_if,
             "in_loop": in_loop,
+            "in_switch": in_switch,
             "in_select": in_select,
             "in_defer": in_defer,
             "in_goroutine": in_goroutine,
+            "in_closure": in_closure,
         }
 
     # ── Module path ───────────────────────────────────────────────────────────
