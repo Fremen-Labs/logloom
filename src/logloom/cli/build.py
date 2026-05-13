@@ -4,12 +4,15 @@ from ..graph.builder import GraphBuilder
 from ..graph.store import save_graph
 
 @click.command()
-@click.option("--source", default=".", help="Source directory or file")
-@click.option("--output", default="logloom-graph.json")
-@click.option("--verbose", is_flag=True)
-@click.option("--redact-patterns", default="", help="Comma-separated list of sensitive terms to redact from message templates")
-def build(source: str, output: str, verbose: bool, redact_patterns: str):
-    """Build the LogLoom knowledge graph."""
+@click.option("--source", default=".", help="Source directory or file to scan.")
+@click.option("--output", default="logloom-graph.json", help="Output graph path.")
+@click.option("--verbose", is_flag=True, help="Show discovered log sites.")
+@click.option("--redact-patterns", default="", help="Comma-separated sensitive terms to redact from templates.")
+@click.option("--git/--no-git", default=True, help="Embed git metadata (commit SHA, branch).")
+@click.option("--tags/--no-tags", default=True, help="Run semantic tag auto-inference.")
+@click.option("--call-graph/--no-call-graph", default=True, help="Resolve inter-function call-graph edges.")
+def build(source: str, output: str, verbose: bool, redact_patterns: str, git: bool, tags: bool, call_graph: bool):
+    """Build the LogLoom knowledge graph from source code."""
     source_path = Path(source)
     if not source_path.exists():
         click.echo(f"❌ Source path {source} does not exist")
@@ -17,7 +20,31 @@ def build(source: str, output: str, verbose: bool, redact_patterns: str):
 
     builder = GraphBuilder()
     patterns = [p.strip() for p in redact_patterns.split(",")] if redact_patterns else []
-    graph = builder.build([source_path], redact_patterns=patterns)
+    
+    graph = builder.build(
+        [source_path],
+        redact_patterns=patterns,
+        enable_tags=tags,
+        enable_call_graph=call_graph,
+        enable_git=git,
+    )
+
+    if verbose:
+        for node in graph.nodes.values():
+            tags_str = f" [{', '.join(node.semantic_tags)}]" if node.semantic_tags else ""
+            click.echo(f"  📍 {node.file}:{node.line} {node.function}() → \"{node.message_template}\"{tags_str}")
 
     save_graph(graph, Path(output))
-    click.echo(f"✅ Built graph with {len(graph.nodes)} nodes → {output}")
+
+    # Summary line
+    tag_count = sum(len(n.semantic_tags) for n in graph.nodes.values())
+    edge_count = sum(len(n.call_parents) + len(n.call_children) for n in graph.nodes.values())
+    parts = [f"{len(graph.nodes)} nodes"]
+    if tag_count:
+        parts.append(f"{tag_count} tags")
+    if edge_count:
+        parts.append(f"{edge_count} edges")
+    if graph.commit_sha:
+        parts.append(f"commit {graph.commit_sha[:8]}")
+
+    click.echo(f"✅ Built graph: {', '.join(parts)} → {output}")

@@ -5,6 +5,14 @@ from typing import List, Optional
 from .base import LogCallSite
 from .queries.python_logs import PYTHON_LOGS_QUERY
 
+# Tree-sitter predicates (#match?) are NOT enforced by py-tree-sitter's
+# QueryCursor — they are informational only. We must filter manually.
+_VALID_LOG_METHODS = frozenset({
+    "debug", "info", "warning", "error", "critical",
+    "exception", "fatal", "log",
+})
+
+
 class PythonScanner:
     def __init__(self):
         self.language = Language(tspython.language())
@@ -37,6 +45,10 @@ class PythonScanner:
             first_arg_node = first_arg_nodes[0]
             
             level = log_method_node.text.decode("utf-8")
+
+            # Manual predicate enforcement: skip non-log methods
+            if level not in _VALID_LOG_METHODS:
+                continue
             
             # Extract string content from first_arg_node (handling f-strings and concats)
             message = self._extract_string(first_arg_node, source)

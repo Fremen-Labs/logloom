@@ -1,5 +1,5 @@
 from pathlib import Path
-from typing import List
+from typing import List, Optional
 from datetime import datetime, timezone
 from .model import LogLoomGraph, GraphNode
 from .hasher import NodeHasher
@@ -7,7 +7,25 @@ from ..scanner.python_scanner import PythonScanner
 from ..scanner.regex_fallback import regex_fallback_scan
 
 class GraphBuilder:
-    def build(self, source_paths: List[Path], project_name: str = "logloom-project", redact_patterns: List[str] = None) -> LogLoomGraph:
+    def build(
+        self,
+        source_paths: List[Path],
+        project_name: str = "logloom-project",
+        redact_patterns: Optional[List[str]] = None,
+        enable_tags: bool = True,
+        enable_call_graph: bool = True,
+        enable_git: bool = True,
+    ) -> LogLoomGraph:
+        """Build the LogLoom knowledge graph from source files.
+
+        Args:
+            source_paths: Files or directories to scan.
+            project_name: Project name for the graph metadata.
+            redact_patterns: Sensitive terms to scrub from message templates.
+            enable_tags: Run the semantic tag inference pass (Issue #14).
+            enable_call_graph: Run the call-graph edge resolver (Issue #15).
+            enable_git: Embed git metadata (Issue #16).
+        """
         scanner = PythonScanner()
         all_sites = []
         
@@ -24,8 +42,6 @@ class GraphBuilder:
 
         # Deduplicate sites by (file_path, line) giving priority to AST scanner
         unique_sites = {}
-        # We append AST sites first, then regex. So we reverse the iteration or just check if not in dict.
-        # Actually all_sites has AST first, then regex.
         for site in all_sites:
             key = (site.file_path, site.line)
             if key not in unique_sites:
@@ -46,6 +62,7 @@ class GraphBuilder:
                 parent_scope=parent_scope
             )
             
+            # Basic semantic tags from level (the tagger will enrich further)
             semantic_tags = []
             if site.log_level.lower() in ("error", "critical", "exception"):
                 semantic_tags.append("error")
@@ -71,12 +88,35 @@ class GraphBuilder:
                 lexical_parents=[parent_scope] if parent_scope else []
             )
 
-        # Remove duplicate nodes by ID (which could happen if scanner and regex find the exact same thing)
-        
-        return LogLoomGraph(
+        graph = LogLoomGraph(
             schema_version="1",
             project=project_name,
             built_at=datetime.now(timezone.utc).isoformat(),
             nodes=nodes,
             redacted_patterns=redact_patterns or []
         )
+
+        # ── Milestone 2 Intelligence Passes ───────────────────────────────
+        if enable_tags:
+            try:
+                from ..intelligence.tagger import infer_tags
+                graph = infer_tags(graph)
+            except ImportError:
+                pass  # Build-time deps not installed
+
+        if enable_call_graph:
+            try:
+                from ..intelligence.call_graph import CallGraphResolver
+                resolver = CallGraphResolver()
+                graph = resolver.resolve(graph, source_paths)
+            except ImportError:
+                pass  # Build-time deps not installed
+
+        if enable_git:
+            try:
+                from ..intelligence.git_meta import enrich_graph_with_git
+                graph = enrich_graph_with_git(graph)
+            except ImportError:
+                pass
+
+        return graph
