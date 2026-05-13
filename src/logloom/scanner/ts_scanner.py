@@ -190,13 +190,27 @@ class TypeScriptScanner:
     # ── Lexical context ───────────────────────────────────────────────────────
 
     def _get_lexical_context(self, node) -> dict:
-        """Walk up the AST to extract full lexical context."""
+        """Walk up the AST to extract full lexical context.
+
+        Detects:
+          - function_declaration / method_definition / arrow_function
+          - class_declaration / class expression
+          - try_statement / catch_clause
+          - if_statement
+          - for / for_in / for_of / while / do loops
+          - switch_statement
+          - nested closures (in_closure)
+          - async functions
+        """
         enclosing_func = None
         class_name = None
         in_try = False
+        in_catch = False
         in_if = False
         in_loop = False
+        in_switch = False
         is_async = False
+        in_closure = False
 
         parent = node.parent
         while parent:
@@ -212,6 +226,8 @@ class TypeScriptScanner:
                     for child in parent.children:
                         if child.type == "async":
                             is_async = True
+                else:
+                    in_closure = True
 
             # Method definitions: class Foo { bar() {} }
             elif ptype == "method_definition":
@@ -219,6 +235,8 @@ class TypeScriptScanner:
                     name_node = parent.child_by_field_name("name")
                     if name_node:
                         enclosing_func = name_node.text.decode("utf-8")
+                else:
+                    in_closure = True
 
             # Arrow functions: const foo = () => {}
             elif ptype == "arrow_function":
@@ -236,6 +254,8 @@ class TypeScriptScanner:
                     for child in parent.children:
                         if child.type == "async":
                             is_async = True
+                else:
+                    in_closure = True
 
             # Anonymous functions: function() {}
             elif ptype == "function":
@@ -247,6 +267,8 @@ class TypeScriptScanner:
                         name_node = parent.parent.child_by_field_name("name")
                         if name_node:
                             enclosing_func = name_node.text.decode("utf-8")
+                else:
+                    in_closure = True
 
             # Class declarations
             elif ptype == "class_declaration":
@@ -263,13 +285,18 @@ class TypeScriptScanner:
                         class_name = name_node.text.decode("utf-8")
 
             # Control flow
-            elif ptype in ("try_statement",):
+            elif ptype == "try_statement":
                 in_try = True
-            elif ptype in ("if_statement",):
+            elif ptype == "catch_clause":
+                in_catch = True
+                in_try = True  # catch is part of try semantics
+            elif ptype == "if_statement":
                 in_if = True
             elif ptype in ("for_statement", "for_in_statement", "while_statement",
                            "do_statement"):
                 in_loop = True
+            elif ptype == "switch_statement":
+                in_switch = True
 
             parent = parent.parent
 
@@ -283,9 +310,12 @@ class TypeScriptScanner:
             "function": qualified or enclosing_func,
             "class_name": class_name,
             "in_try_except": in_try,
+            "in_catch": in_catch,
             "in_if_block": in_if,
             "in_loop": in_loop,
+            "in_switch": in_switch,
             "is_async": is_async,
+            "in_closure": in_closure,
         }
 
     # ── Module path ───────────────────────────────────────────────────────────

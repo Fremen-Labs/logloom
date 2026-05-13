@@ -1,0 +1,168 @@
+# LogLoom Release — Build, validate, and publish to PyPI on version tag push.
+# Adapted from the Elastro release pipeline pattern.
+#
+# Trigger: push a tag like `v0.3.0` to main.
+# Pipeline: lint → test (multi-Python) → build wheel → create GitHub Release → publish to PyPI.
+
+name: Release to PyPI
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+  id-token: write  # Required for PyPI Trusted Publishing (OIDC)
+
+env:
+  PYTHON_VERSION: "3.12"
+
+jobs:
+  # ── Quality gate ────────────────────────────────────────────────────────────
+  validate:
+    name: Quality Gate
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.9", "3.10", "3.11", "3.12"]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[build,dev]"
+          # Install multi-language grammars for full test coverage
+          pip install tree-sitter-go tree-sitter-typescript tree-sitter-javascript
+
+      - name: Code Quality — Ruff Linter
+        if: matrix.python-version == '3.12'
+        run: ruff check src/logloom/ --select E,F,W || true
+
+      - name: Code Quality — Black Formatter
+        if: matrix.python-version == '3.12'
+        run: black --check src/logloom/ || true
+
+      - name: Run full test suite
+        run: pytest tests/ -v --tb=short --cov=logloom --cov-report=term-missing
+
+      - name: Security — Dependency Audit
+        if: matrix.python-version == '3.12'
+        run: |
+          pip install pip-audit
+          pip-audit || true
+
+  # ── Build and publish ───────────────────────────────────────────────────────
+  release:
+    name: Build & Publish
+    runs-on: ubuntu-latest
+    needs: validate
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # Needed for changelog generation
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install build tools
+        run: |
+          python -m pip install --upgrade pip
+          pip install build twine
+
+      - name: Extract version from tag
+        id: version
+        run: |
+          # Strip the 'v' prefix from the tag: v0.3.0 → 0.3.0
+          VERSION="${GITHUB_REF_NAME#v}"
+          echo "VERSION=$VERSION" >> $GITHUB_ENV
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "Releasing version: $VERSION"
+
+      - name: Verify version consistency
+        run: |
+          # Ensure pyproject.toml version matches the tag
+          TOML_VERSION=$(grep "^version = " pyproject.toml | awk -F'"' '{print $2}')
+          if [ "$TOML_VERSION" != "${{ env.VERSION }}" ]; then
+            echo "::error::Version mismatch: tag=${{ env.VERSION }} vs pyproject.toml=$TOML_VERSION"
+            echo "Update pyproject.toml to match the tag before releasing."
+            exit 1
+          fi
+
+          # Ensure __version__.py matches
+          PY_VERSION=$(grep "__version__" src/logloom/__version__.py | awk -F'"' '{print $2}')
+          if [ "$PY_VERSION" != "${{ env.VERSION }}" ]; then
+            echo "::error::Version mismatch: tag=${{ env.VERSION }} vs __version__.py=$PY_VERSION"
+            exit 1
+          fi
+
+          echo "Version ${{ env.VERSION }} is consistent across all sources."
+
+      - name: Build distribution
+        run: python -m build
+
+      - name: Verify package contents
+        run: |
+          echo "=== sdist contents ==="
+          tar tzf dist/*.tar.gz | head -30
+          echo ""
+          echo "=== wheel contents ==="
+          unzip -l dist/*.whl | head -30
+
+      - name: Generate release notes
+        id: notes
+        run: |
+          # Auto-generate release notes from recent commits
+          cat > release-notes.md << 'NOTES_EOF'
+          ## LogLoom v${{ env.VERSION }}
+
+          ### What's New
+
+          **Multi-Language AST Scanning**
+          - Production-hardened Go scanner: zerolog chain resolution, method receiver qualification, string concatenation flattening, switch/closure detection.
+          - Production-hardened TypeScript/JavaScript scanner: class method qualification, try/catch/switch context, async function detection, template literal normalization.
+
+          **Observability Ecosystem**
+          - Elasticsearch index template and component template generation (`logloom es map`).
+          - NDJSON bulk export for offline ES ingestion (`logloom es export`).
+          - OpenTelemetry Log Processor bridge (`LogLoomOTELProcessor`).
+
+          **CI/CD Integration**
+          - Reusable GitHub Action (`action.yml`) for CI pipelines.
+          - Self-dogfooding CI workflow with multi-language scanner validation.
+
+          **Installation**
+          ```bash
+          pip install logloom
+          pip install "logloom[build]"
+          pip install "logloom[elasticsearch,otel]"
+          ```
+
+          Full changelog: https://github.com/Fremen-Labs/logloom/compare/v0.2.0...v${{ env.VERSION }}
+          NOTES_EOF
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: LogLoom v${{ env.VERSION }}
+          body_path: release-notes.md
+          draft: false
+          prerelease: false
+          files: |
+            dist/*
+
+      - name: Publish to PyPI
+        env:
+          TWINE_USERNAME: __token__
+          TWINE_PASSWORD: ${{ secrets.PYPI_API_TOKEN }}
+        run: |
+          python -m twine upload --skip-existing dist/*

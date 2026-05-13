@@ -120,8 +120,15 @@ class LogLoomOTELHandler:
         self._original_makeRecord = None
 
     def install(self):
-        """Monkey-patch ``logging.Logger.makeRecord`` to inject LogLoom attributes."""
+        """Monkey-patch ``logging.Logger.makeRecord`` to inject LogLoom attributes.
+
+        Safe to call multiple times — subsequent calls are no-ops.
+        """
         import logging
+
+        # Idempotency guard: don't re-capture a patched function as the original
+        if self._original_makeRecord is not None:
+            return
 
         original = logging.Logger.makeRecord
         resolver = self._resolver
