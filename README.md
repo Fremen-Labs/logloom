@@ -17,7 +17,7 @@
 **Weave your codebase into every log line.**  
 *Like a 90s BBS sysop who actually knew where the packets were dropping.*
 
-Turn flat, boring logs into a **queryable execution graph** with zero developer friction.  
+Turn flat, human friendly logs into a **queryable execution graph** machines can understand, all with zero developer friction.  
 Build-time AST magic meets runtime enlightenment — perfect for humans, agentic debuggers, and Elasticsearch wranglers alike.
 
 ## Why LogLoom? (The Real Talk)
