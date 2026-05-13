@@ -1,16 +1,15 @@
 import tree_sitter_python as tspython
-from tree_sitter import Language, Parser
+from tree_sitter import Language, Parser, Query, QueryCursor
 from pathlib import Path
-from typing import List
+from typing import List, Optional
 from .base import LogCallSite
 from .queries.python_logs import PYTHON_LOGS_QUERY
 
 class PythonScanner:
     def __init__(self):
         self.language = Language(tspython.language())
-        self.parser = Parser()
-        self.parser.set_language(self.language)
-        self.query = self.language.query(PYTHON_LOGS_QUERY)
+        self.parser = Parser(self.language)
+        self.query = Query(self.language, PYTHON_LOGS_QUERY)
 
     def scan_file(self, file_path: Path) -> List[LogCallSite]:
         if not file_path.suffix == ".py":
@@ -20,34 +19,12 @@ class PythonScanner:
             source = f.read()
 
         tree = self.parser.parse(source)
-        captures = self.query.captures(tree.root_node)
+        cursor = QueryCursor(self.query)
+        matches = cursor.matches(tree.root_node)
 
         sites = []
-        for node, tag in captures:
-            if tag == "log_call" or tag == "log_call_module":
-                # Find the level
-                level_node = None
-                for child in node.child_by_field_name("function").children:
-                    if child.type == "identifier":
-                        level_node = child
-                
-                level = level_node.text.decode("utf-8") if level_node else "info"
-
-                # Extract message from @first_arg
-                # We need to find the node tagged as @first_arg in this capture match
-                # captures returns (node, tag), so if we are at log_call, the @first_arg is a different capture.
-                # Actually, the python_logs.scm assigns @first_arg to the first argument.
-                # Let's iterate over captures and group them by the main log_call node.
-                pass
-
-        # Since Tree-sitter captures are flattened, a better approach is to group them
-        # Let's refactor to process query matches
-        matches = self.query.matches(tree.root_node)
-        
         for match in matches:
-            # match is a tuple: (pattern_index, dict_of_captures)
-            # Actually, `query.matches` returns a list of tuples: (pattern_index, dict_mapping_tag_to_nodes)
-            # In tree-sitter python bindings (v0.23+), `query.matches` yields (pattern_index, capture_dict) where capture_dict maps string names to lists of Nodes
+            # match is (pattern_index, dict_mapping_tag_to_nodes)
             captures_dict = match[1]
             
             log_method_nodes = captures_dict.get("log_method", [])
@@ -61,35 +38,11 @@ class PythonScanner:
             
             level = log_method_node.text.decode("utf-8")
             
-            # Extract string content from first_arg_node
+            # Extract string content from first_arg_node (handling f-strings and concats)
             message = self._extract_string(first_arg_node, source)
             
-            # Find enclosing function
-            parent = log_method_node.parent
-            enclosing_func = None
-            in_try_except = False
-            
-            while parent:
-                if parent.type == "function_definition":
-                    name_node = parent.child_by_field_name("name")
-                    if name_node:
-                        enclosing_func = name_node.text.decode("utf-8")
-                        break
-                if parent.type == "try_statement":
-                    in_try_except = True
-                parent = parent.parent
-
-            # Extract class name if inside a class
-            class_name = None
-            if parent:
-                class_parent = parent.parent
-                while class_parent:
-                    if class_parent.type == "class_definition":
-                        name_node = class_parent.child_by_field_name("name")
-                        if name_node:
-                            class_name = name_node.text.decode("utf-8")
-                            break
-                    class_parent = class_parent.parent
+            # Lexical context traversal
+            enclosing_func, class_name, in_try, in_if, in_loop, decorators = self._get_lexical_context(log_method_node)
 
             sites.append(LogCallSite(
                 file_path=str(file_path),
@@ -102,24 +55,74 @@ class PythonScanner:
                 column=log_method_node.start_point.column,
                 lexical_context={
                     "enclosing_function": enclosing_func,
-                    "in_try_except": in_try_except
+                    "in_try_except": in_try,
+                    "in_if_block": in_if,
+                    "in_loop": in_loop,
+                    "decorators": decorators
                 }
             ))
 
         return sites
 
     def _extract_string(self, node, source: bytes) -> str:
-        """Extract literal text from a string or f-string node."""
+        """Extract literal text from a string, f-string, or binary expression node."""
         if node.type == "string":
             # Just extract the text and strip quotes
             text = node.text.decode("utf-8")
-            if text.startswith('f"') or text.startswith("f'"):
+            if text.startswith('f"') or text.startswith("f'") or text.startswith('r"') or text.startswith("r'"):
                 return text[2:-1]
             elif text.startswith('"') or text.startswith("'"):
                 return text[1:-1]
             return text
-        # If it's a binary expression like "a" + "b", we can just return the raw source
-        return node.text.decode("utf-8").strip("\"'")
+        
+        # If it's a binary expression like "a" + "b", return raw source
+        # If it's an f-string without quote nodes (sometimes represented differently in tree-sitter)
+        text = node.text.decode("utf-8")
+        # Quick strip of common string wrapper quotes
+        if text.startswith('f"') or text.startswith("f'"):
+            return text[2:-1]
+        elif text.startswith('"') or text.startswith("'"):
+            return text[1:-1]
+        
+        return text
+
+    def _get_lexical_context(self, node):
+        enclosing_func = None
+        class_name = None
+        in_try = False
+        in_if = False
+        in_loop = False
+        decorators = []
+        
+        parent = node.parent
+        while parent:
+            if parent.type == "function_definition":
+                if not enclosing_func: # Only grab the innermost function
+                    name_node = parent.child_by_field_name("name")
+                    if name_node:
+                        enclosing_func = name_node.text.decode("utf-8")
+                    
+                    # Grab decorators if any
+                    for child in parent.children:
+                        if child.type == "decorator":
+                            decorators.append(child.text.decode("utf-8").lstrip("@"))
+            
+            elif parent.type == "class_definition":
+                if not class_name: # Innermost class
+                    name_node = parent.child_by_field_name("name")
+                    if name_node:
+                        class_name = name_node.text.decode("utf-8")
+            
+            elif parent.type == "try_statement":
+                in_try = True
+            elif parent.type == "if_statement":
+                in_if = True
+            elif parent.type in ["for_statement", "while_statement"]:
+                in_loop = True
+                
+            parent = parent.parent
+            
+        return enclosing_func, class_name, in_try, in_if, in_loop, decorators
 
     def _get_module_path(self, file_path: Path) -> str:
         parts = list(file_path.with_suffix("").parts)
