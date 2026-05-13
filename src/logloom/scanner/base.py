@@ -1,20 +1,15 @@
-from abc import ABC, abstractmethod
 from dataclasses import dataclass
+from pathlib import Path
 from typing import List, Optional
 
-@dataclass
+@dataclass(frozen=True)
 class LogCallSite:
     file_path: str
     module_path: str
-    class_name: Optional[str] = None
+    class_name: Optional[str]
     function_name: str
     log_level: str
     message_template: str
-    line_number: int
+    line: int
     column: int
-    lexical_context: dict = None  # For Phase 1 lexical parents
-
-class BaseScanner(ABC):
-    @abstractmethod
-    def scan(self, source_paths: List[str]) -> List[LogCallSite]:
-        pass
+    lexical_context: dict = None  # Will hold enclosing function, try/except, etc.
