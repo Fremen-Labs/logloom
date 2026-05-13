@@ -25,10 +25,11 @@ Build-time AST magic meets runtime enlightenment — perfect for humans, agentic
 Modern logs are like 90s AOL chat: humans can read them, but good luck getting an AI to understand the *intent* behind the code.  
 
 LogLoom fixes that by:
-- Scanning your source **at build time** (Tree-sitter powered — no runtime tax)
+- Scanning your source **at build time** across languages (Python, Go, TypeScript/JavaScript — no runtime tax)
 - Building a stable semantic knowledge graph
 - Injecting tiny, permanent `ll:` node references into every log line
-- Giving Elasticsearch + AI agents instant causal superpowers
+- Shipping directly to Elasticsearch and OpenTelemetry with native bridges
+- Giving your observability stack instant causal superpowers
 
 All while your human logs stay clean. No more "where the heck was this log called?" detective work at 3am.
 
@@ -90,26 +91,41 @@ Now your Elastic queries and AI agents can say things like:
 *"Show me every failure in the auth retry path in the last hour"*  
 and actually get meaningful answers.
 
-## Core Features
+## Core Features (The Specs)
 
 - **Zero runtime overhead** when graph is missing (graceful fallback)
 - **Stable node IDs** that survive refactors
+- **Multi-language Scanners**: Production-grade Tree-sitter AST parsing for Python, Go (zerolog, zap, slog), and TypeScript/JavaScript (winston, pino, console).
+- **Native OpenTelemetry Bridge**: Plug-and-play like a Game Boy cartridge. Slap it in and your spans are magically annotated.
+- **Elasticsearch Shipper & Mappings**: Auto-generates ECS-compliant component templates and ships your graph directly into Elasticsearch via `_bulk`.
+- **GitHub Action Native**: Just `uses: fremenlabs/logloom@v0.3.0` in your CI pipeline.
 - **Redaction support** (`--redact-patterns "password,token"`)
 - Works great with structlog (and stdlib logging via wrapper)
-- Designed from day one for Elasticsearch + OpenTelemetry
-- Multi-language ready (Python first, Go/TS coming)
 
 ## Installation
 
 ```bash
-# For normal use
+# For normal runtime use
 pip install logloom
 
-# For building graphs
+# For building graphs (includes Tree-sitter binaries)
 pip install "logloom[build]"
+
+# For Elastic and OTEL ecosystem power-ups
+pip install "logloom[elasticsearch,otel]"
 ```
 
-## Milestone 2 Intelligence
+## Milestone 3: Ecosystem (v0.3.0)
+
+We just dialed into the mainframe and dropped the Ecosystem update:
+
+- **Production Go & TS Scanners**: Handles complex method chains, anonymous closures, try/catch blocks, and asynchronous flow control. 
+- **`logloom es map`**: Generates massive, beautiful Elasticsearch index templates with our `logloom.*` ECS namespace.
+- **`logloom es export`**: NDJSON shipper that blasts your graph into an Elasticsearch enrichment index.
+- **OTEL Log Processor**: `LogLoomProcessor` intercepts standard OpenTelemetry LogRecords and injects semantic tags and graph provenance before export.
+- **GitHub Action**: Ready for your CI/CD pipelines right out of the box.
+
+## Milestone 2: Intelligence (v0.2.0)
 
 - **Semantic tag inference** — auto-detects `auth`, `error`, `db`, etc.
 - **Inter-function call-graph** — tracks caller/callee relationships
