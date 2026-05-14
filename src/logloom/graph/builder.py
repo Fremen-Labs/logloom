@@ -1,3 +1,4 @@
+import re
 from pathlib import Path
 from typing import List, Optional
 from datetime import datetime, timezone
@@ -5,6 +6,50 @@ from .model import LogLoomGraph, GraphNode
 from .hasher import NodeHasher
 from ..scanner.python_scanner import PythonScanner
 from ..scanner.regex_fallback import regex_fallback_scan
+
+
+def _detect_project_name(source_paths: List[Path]) -> str:
+    """Auto-detect project name from pyproject.toml, setup.cfg, or directory name.
+
+    Walks up from the first source path looking for project metadata files.
+    Falls back to the source directory name.
+    """
+    start = source_paths[0].resolve() if source_paths else Path.cwd()
+    search_dir = start if start.is_dir() else start.parent
+
+    # Walk up looking for pyproject.toml or setup.cfg
+    current = search_dir
+    for _ in range(10):
+        # Try pyproject.toml
+        pyproject = current / "pyproject.toml"
+        if pyproject.exists():
+            try:
+                text = pyproject.read_text(encoding="utf-8")
+                # Parse [project] name = "..."
+                match = re.search(r'^name\s*=\s*["\']([^"\']+)["\']', text, re.MULTILINE)
+                if match:
+                    return match.group(1)
+            except Exception:
+                pass
+
+        # Try setup.cfg
+        setup_cfg = current / "setup.cfg"
+        if setup_cfg.exists():
+            try:
+                text = setup_cfg.read_text(encoding="utf-8")
+                match = re.search(r'^name\s*=\s*(.+)$', text, re.MULTILINE)
+                if match:
+                    return match.group(1).strip()
+            except Exception:
+                pass
+
+        parent = current.parent
+        if parent == current:
+            break
+        current = parent
+
+    # Fallback: use the source directory name
+    return search_dir.name or "logloom-project"
 
 # File extensions that each scanner handles
 _PYTHON_EXTS = {".py"}
@@ -16,7 +61,7 @@ class GraphBuilder:
     def build(
         self,
         source_paths: List[Path],
-        project_name: str = "logloom-project",
+        project_name: Optional[str] = None,
         redact_patterns: Optional[List[str]] = None,
         enable_tags: bool = True,
         enable_call_graph: bool = True,
@@ -35,6 +80,9 @@ class GraphBuilder:
             languages: List of language codes to scan. Default: ["python"].
                        Options: "python", "go", "typescript".
         """
+        if project_name is None:
+            project_name = _detect_project_name(source_paths)
+
         if languages is None:
             languages = ["python"]
 

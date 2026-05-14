@@ -20,14 +20,25 @@ def export_ndjson(
     graph: LogLoomGraph,
     index_name: str = "logloom-enrichment",
     output_path: Optional[Path] = None,
+    include_mapping: bool = True,
 ) -> str:
     """Export graph nodes as NDJSON suitable for the ``_bulk`` API.
+
+    When ``include_mapping`` is True (default), writes an ``es-mapping.json``
+    sidecar file alongside the NDJSON output with the proper index creation
+    body. This ensures aggregations work on ``logloom.*`` fields.
 
     Returns the NDJSON string. If ``output_path`` is provided, also writes
     it to disk.
 
     Usage with curl::
 
+        # Step 1: Create index with mapping
+        curl -s -XPUT "http://localhost:9200/logloom-enrichment" \\
+             -H "Content-Type: application/json" \\
+             -d @logloom-enrichment-mapping.json
+
+        # Step 2: Bulk import
         curl -s -XPOST "http://localhost:9200/_bulk" \\
              -H "Content-Type: application/x-ndjson" \\
              --data-binary @logloom-enrichment.ndjson
@@ -48,7 +59,35 @@ def export_ndjson(
     if output_path:
         output_path.write_text(ndjson, encoding="utf-8")
 
+        # Write sidecar mapping file for index creation
+        if include_mapping:
+            mapping_path = output_path.with_name(
+                output_path.stem + "-mapping.json"
+            )
+            index_body = _generate_index_creation_body(index_name)
+            mapping_path.write_text(
+                json.dumps(index_body, indent=2), encoding="utf-8"
+            )
+
     return ndjson
+
+
+def _generate_index_creation_body(index_name: str) -> Dict[str, Any]:
+    """Generate the JSON body for ``PUT /<index>`` with proper keyword mappings."""
+    from .mapping import LOGLOOM_FIELD_MAPPING
+
+    return {
+        "settings": {
+            "number_of_shards": 1,
+            "number_of_replicas": 0,
+        },
+        "mappings": {
+            "properties": {
+                **LOGLOOM_FIELD_MAPPING,
+            },
+        },
+    }
+
 
 
 def ship_to_elasticsearch(

@@ -1,0 +1,3 @@
+2026-05-14 12:27:53 - elastro.core.client - INFO - Connecting to Elasticsearch at ['http://localhost:9205']...
+2026-05-14 12:27:53 - elastro.core.client - INFO - Connecting with params: hosts=['http://localhost:9205'], auth={'type': 'basic', 'username': 'elastic', 'password': '******', 'api_key': '******'}, basic_auth=('elastic', '******')
+2026-05-14 12:27:53 - elastro.core.client - INFO - Successfully connected to Elasticsearch

@@ -63,8 +63,14 @@ def export(graph_path: str, index_name: str, output: str):
     ndjson = export_ndjson(g, index_name=index_name, output_path=out_path)
 
     line_count = len(ndjson.strip().split("\n")) // 2
+    mapping_path = out_path.with_name(out_path.stem + "-mapping.json")
     console.print(f"✅ Exported {line_count} docs → {out_path}")
-    console.print(f"   [dim]curl -XPOST 'http://localhost:9200/_bulk' -H 'Content-Type: application/x-ndjson' --data-binary @{out_path}[/dim]")
+    console.print(f"   [dim]Mapping: {mapping_path}[/dim]")
+    console.print()
+    console.print("   [dim]# Step 1: Create index with mapping[/dim]")
+    console.print(f"   [dim]curl -s -XPUT 'http://localhost:9200/{index_name}' -H 'Content-Type: application/json' -d @{mapping_path}[/dim]")
+    console.print("   [dim]# Step 2: Bulk import[/dim]")
+    console.print(f"   [dim]curl -s -XPOST 'http://localhost:9200/_bulk' -H 'Content-Type: application/x-ndjson' --data-binary @{out_path}[/dim]")
 
 
 @es.command()
@@ -105,3 +111,60 @@ def ship(graph_path: str, es_url: str, index_name: str, api_key: str,
                 console.print(f"   [dim]{err}[/dim]")
     except ImportError as e:
         console.print(f"[red]{e}[/red]")
+
+
+@es.command()
+@click.option("--policy-name", default="logloom-enrich", help="Enrich policy name.")
+@click.option("--pipeline-name", default="logloom-pipeline", help="Ingest pipeline name.")
+@click.option("--source-index", default="logloom-enrichment", help="Enrichment source index.")
+@click.option("--output", default=None, help="Write to file instead of stdout.")
+def pipeline(policy_name: str, pipeline_name: str, source_index: str, output: str):
+    """Generate Elasticsearch enrich policy and ingest pipeline.
+
+    Produces the JSON bodies for:
+      1. PUT _enrich/policy/<name>       — the enrich policy
+      2. PUT _ingest/pipeline/<name>     — the ingest pipeline
+
+    Together these enable automatic code-context enrichment: any log
+    document arriving with a logloom.node_id field gets the full
+    semantic context (module, function, tags, call-graph) joined
+    from the enrichment index at ingest time.
+    """
+    import json
+    from ..elasticsearch.mapping import generate_enrich_policy, generate_enrich_pipeline
+
+    policy = generate_enrich_policy(policy_name=policy_name, source_index=source_index)
+    pipe = generate_enrich_pipeline(pipeline_name=pipeline_name, policy_name=policy_name)
+
+    result = {
+        "enrich_policy": {
+            "api": f"PUT _enrich/policy/{policy_name}",
+            "body": policy,
+        },
+        "ingest_pipeline": {
+            "api": f"PUT _ingest/pipeline/{pipeline_name}",
+            "body": pipe,
+        },
+        "usage": {
+            "step_1": f"PUT _enrich/policy/{policy_name}  (create policy)",
+            "step_2": f"POST _enrich/policy/{policy_name}/_execute  (build enrich index)",
+            "step_3": f"PUT _ingest/pipeline/{pipeline_name}  (create pipeline)",
+            "step_4": f"PUT /my-logs/_settings  {{ \"index.default_pipeline\": \"{pipeline_name}\" }}",
+        },
+    }
+
+    formatted = json.dumps(result, indent=2)
+
+    if output:
+        Path(output).write_text(formatted, encoding="utf-8")
+        console.print(f"✅ Pipeline config written to {output}")
+    else:
+        console.print(formatted)
+
+    console.print()
+    console.print("[bold]Deployment steps:[/bold]")
+    console.print(f"  1. [cyan]PUT _enrich/policy/{policy_name}[/cyan]")
+    console.print(f"  2. [cyan]POST _enrich/policy/{policy_name}/_execute[/cyan]")
+    console.print(f"  3. [cyan]PUT _ingest/pipeline/{pipeline_name}[/cyan]")
+    console.print(f"  4. Assign pipeline to your log index")
+

@@ -187,3 +187,76 @@ def render_mapping_json(template_type: str = "component", **kwargs) -> str:
     if template_type == "component":
         return json.dumps(generate_component_template(**kwargs), indent=2)
     return json.dumps(generate_index_template(**kwargs), indent=2)
+
+
+def generate_enrich_policy(
+    policy_name: str = "logloom-enrich",
+    source_index: str = "logloom-enrichment",
+) -> Dict[str, Any]:
+    """Generate an Elasticsearch enrich policy for LogLoom node_id lookup.
+
+    This policy enables automatic enrichment of incoming log documents:
+    when a log event contains ``logloom.node_id``, the enrich processor
+    joins the full semantic context from the enrichment index.
+
+    Workflow::
+
+        1. Index enrichment docs:   logloom es ship
+        2. Create policy:           PUT _enrich/policy/logloom-enrich
+        3. Execute policy:          POST _enrich/policy/logloom-enrich/_execute
+        4. Attach to pipeline:      PUT _ingest/pipeline/logloom-pipeline
+        5. Assign pipeline to index: PUT /my-logs/_settings { "index.default_pipeline": "logloom-pipeline" }
+    """
+    return {
+        "match": {
+            "indices": source_index,
+            "match_field": "logloom.node_id",
+            "enrich_fields": [
+                "logloom.module",
+                "logloom.function",
+                "logloom.file",
+                "logloom.line",
+                "logloom.level",
+                "logloom.tags",
+                "logloom.message_template",
+                "logloom.call_parents",
+                "logloom.call_children",
+                "logloom.graph_version",
+                "logloom.commit_sha",
+                "logloom.branch",
+            ],
+        }
+    }
+
+
+def generate_enrich_pipeline(
+    pipeline_name: str = "logloom-pipeline",
+    policy_name: str = "logloom-enrich",
+) -> Dict[str, Any]:
+    """Generate an ingest pipeline that enriches logs with LogLoom context.
+
+    When a log document arrives with a ``logloom.node_id`` field, this
+    pipeline calls the enrich processor to join the full semantic context
+    from the enrichment index. If ``logloom.node_id`` is missing, the
+    document passes through unchanged.
+    """
+    return {
+        "description": "LogLoom code-context enrichment pipeline — joins "
+                       "semantic metadata from the logloom enrichment index "
+                       "onto incoming log events.",
+        "processors": [
+            {
+                "enrich": {
+                    "description": "Join LogLoom graph context by node_id",
+                    "policy_name": policy_name,
+                    "field": "logloom.node_id",
+                    "target_field": "logloom",
+                    "max_matches": 1,
+                    "override": True,
+                    "ignore_missing": True,
+                    "if": "ctx?.logloom?.node_id != null",
+                }
+            }
+        ],
+    }
+
