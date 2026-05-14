@@ -12,7 +12,8 @@ from ..graph.store import save_graph
 @click.option("--tags/--no-tags", default=True, help="Run semantic tag auto-inference.")
 @click.option("--call-graph/--no-call-graph", default=True, help="Resolve inter-function call-graph edges.")
 @click.option("--languages", default="python", help="Comma-separated languages: python,go,typescript.")
-def build(source: str, output: str, verbose: bool, redact_patterns: str, git: bool, tags: bool, call_graph: bool, languages: str):
+@click.option("--name", "project_name", default=None, help="Project name (auto-detected from pyproject.toml or directory).")
+def build(source: str, output: str, verbose: bool, redact_patterns: str, git: bool, tags: bool, call_graph: bool, languages: str, project_name: str):
     """Build the LogLoom knowledge graph from source code."""
     source_path = Path(source)
     if not source_path.exists():
@@ -25,6 +26,7 @@ def build(source: str, output: str, verbose: bool, redact_patterns: str, git: bo
 
     graph = builder.build(
         [source_path],
+        project_name=project_name,
         redact_patterns=patterns,
         enable_tags=tags,
         enable_call_graph=call_graph,
