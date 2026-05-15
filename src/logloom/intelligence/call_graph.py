@@ -89,6 +89,34 @@ class CallGraphResolver:
         for node in graph.nodes.values():
             func_to_nodes.setdefault(node.function, []).append(node.node_id)
 
+        # Step 2b: Build a bare-method-name → qualified-name index.
+        # The call_map uses bare names ("probeAll") from selector_expression
+        # resolution, but the graph uses receiver-qualified names
+        # ("HealthChecker.probeAll"). This index bridges the gap.
+        bare_to_qualified: Dict[str, List[str]] = {}
+        for func_name in func_to_nodes:
+            if "." in func_name:
+                bare = func_name.rsplit(".", 1)[1]
+                bare_to_qualified.setdefault(bare, []).append(func_name)
+
+        def _resolve_func_nodes(func_name: str) -> List[str]:
+            """Resolve a function name to node IDs, including bare→qualified fallback."""
+            node_ids = func_to_nodes.get(func_name, [])
+            if not node_ids:
+                # Try qualified forms: "probeAll" → ["HealthChecker.probeAll"]
+                for qualified in bare_to_qualified.get(func_name, []):
+                    node_ids.extend(func_to_nodes.get(qualified, []))
+            return node_ids
+
+        def _func_matches_callee(func_name: str, callee: str) -> bool:
+            """Check if a function name matches a callee, including bare match."""
+            if func_name == callee:
+                return True
+            # Bare match: callee "probeAll" matches "HealthChecker.probeAll"
+            if "." in func_name and func_name.rsplit(".", 1)[1] == callee:
+                return True
+            return False
+
         # Step 3: For each node, populate call_parents and call_children
         new_nodes: Dict[str, GraphNode] = {}
         for node_id, node in graph.nodes.items():
@@ -97,14 +125,15 @@ class CallGraphResolver:
 
             # Find parent functions (functions that call this node's function)
             for caller, callees in call_map.items():
-                if node.function in callees and caller != node.function:
-                    for parent_node_id in func_to_nodes.get(caller, []):
-                        parents.add(parent_node_id)
+                for callee in callees:
+                    if _func_matches_callee(node.function, callee) and caller != node.function:
+                        for parent_node_id in _resolve_func_nodes(caller):
+                            parents.add(parent_node_id)
 
             # Find child functions (functions called by this node's function)
             for callee in call_map.get(node.function, set()):
                 if callee != node.function:
-                    for child_node_id in func_to_nodes.get(callee, []):
+                    for child_node_id in _resolve_func_nodes(callee):
                         children.add(child_node_id)
 
             new_nodes[node_id] = node.model_copy(update={
@@ -256,13 +285,14 @@ class _GoCallGraphResolver:
             self._walk_go_declarations(child, call_map, source)
 
     def _extract_go_callees(self, body_node, source: bytes) -> Set[str]:
-        """Walk a function body to find all call_expression and go_statement targets.
+        """Walk a function body to find all call targets including goroutines.
 
         Handles:
-          - Direct calls:    someFunc(args)         → "someFunc"
-          - Method calls:    obj.Method(args)       → "Method"  (bare)
-          - Qualified calls: s.handleAuth(args)     → resolved via receiver type
-          - Goroutine:       go worker.Process()    → "Process"
+          - Direct calls:    someFunc(args)             → "someFunc"
+          - Method calls:    obj.Method(args)           → "Method"
+          - Goroutine named: go serveControlPlane(ch)   → "serveControlPlane"
+          - Goroutine method: go p.probeModel(ctx, fm)  → "probeModel"
+          - Goroutine closure: go func() { calls... }() → walks closure body
         """
         callees: Set[str] = set()
         self._walk_calls(body_node, callees, source)
@@ -278,21 +308,46 @@ class _GoCallGraphResolver:
                     callees.add(callee)
 
         elif node.type == "go_statement":
-            # go someFunc()  or  go obj.Method()
-            # The first child after "go" is the call_expression
+            # Goroutine launch — three patterns:
+            #
+            # Pattern A: go namedFunc(args)
+            #   go_statement → call_expression → identifier
+            #
+            # Pattern B: go obj.Method(args)
+            #   go_statement → call_expression → selector_expression
+            #
+            # Pattern C: go func() { body }()
+            #   go_statement → call_expression → func_literal (+ argument_list)
+            #   The closure body contains calls that should be attributed
+            #   to the enclosing function as goroutine-spawned edges.
             for child in node.children:
                 if child.type == "call_expression":
                     fn = child.child_by_field_name("function")
                     if fn:
-                        callee = self._resolve_callee(fn, source)
-                        if callee and callee not in _GO_BUILTIN_SKIP:
-                            callees.add(callee)
+                        if fn.type == "func_literal":
+                            # Pattern C: inline goroutine closure.
+                            # Walk into the closure body to extract the calls
+                            # it makes — these are concurrent work spawned by
+                            # the enclosing function.
+                            closure_body = fn.child_by_field_name("body")
+                            if closure_body:
+                                self._walk_calls(closure_body, callees, source)
+                        else:
+                            # Pattern A or B: named function / method call
+                            callee = self._resolve_callee(fn, source)
+                            if callee and callee not in _GO_BUILTIN_SKIP:
+                                callees.add(callee)
+            # Don't recurse into go_statement children normally —
+            # we already handled all child patterns above.
+            return
 
-        # Recurse — but DON'T recurse into nested function literals to avoid
-        # attributing closure calls to the outer function (they get their own entry)
+        # Recurse into children. Skip standalone func_literals (assigned closures
+        # like `handler := func() { ... }`) — those get their own graph entry.
+        # But goroutine closures are handled above in the go_statement branch.
         for child in node.children:
             if child.type != "func_literal":
                 self._walk_calls(child, callees, source)
+
 
     def _resolve_callee(self, fn_node, source: bytes) -> Optional[str]:
         """Resolve a call target to a function name matching the graph's naming.
