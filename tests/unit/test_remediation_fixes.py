@@ -148,9 +148,16 @@ class TestEnrichmentPipeline:
     def test_enrich_pipeline_structure(self):
         pipe = generate_enrich_pipeline()
         assert "processors" in pipe
-        assert len(pipe["processors"]) == 1
+        assert len(pipe["processors"]) == 2
 
-        enrich = pipe["processors"][0]["enrich"]
+        # Phase 1: rename processor normalises underscore → dot notation
+        rename = pipe["processors"][0]["rename"]
+        assert rename["field"] == "logloom_node_id"
+        assert rename["target_field"] == "logloom.node_id"
+        assert rename["ignore_missing"] is True
+
+        # Phase 2: enrich processor joins graph context
+        enrich = pipe["processors"][1]["enrich"]
         assert enrich["policy_name"] == "logloom-enrich"
         assert enrich["field"] == "logloom.node_id"
         assert enrich["target_field"] == "logloom"
@@ -161,11 +168,11 @@ class TestEnrichmentPipeline:
             pipeline_name="my-pipeline",
             policy_name="my-policy",
         )
-        enrich = pipe["processors"][0]["enrich"]
+        enrich = pipe["processors"][1]["enrich"]
         assert enrich["policy_name"] == "my-policy"
 
     def test_pipeline_conditional_script(self):
         pipe = generate_enrich_pipeline()
-        enrich = pipe["processors"][0]["enrich"]
+        enrich = pipe["processors"][1]["enrich"]
         # Should only run when logloom.node_id is present
         assert "ctx?.logloom?.node_id" in enrich["if"]

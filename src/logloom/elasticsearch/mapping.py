@@ -235,16 +235,37 @@ def generate_enrich_pipeline(
 ) -> Dict[str, Any]:
     """Generate an ingest pipeline that enriches logs with LogLoom context.
 
-    When a log document arrives with a ``logloom.node_id`` field, this
-    pipeline calls the enrich processor to join the full semantic context
-    from the enrichment index. If ``logloom.node_id`` is missing, the
-    document passes through unchanged.
+    Two-phase pipeline:
+      1. **Rename** — Normalises underscore-delimited field names emitted by
+         Filebeat/Beat transports (``logloom_node_id``) into ECS-style
+         dot-notation (``logloom.node_id``).  This is a no-op for OTEL
+         transports that already use dot notation (``ignore_missing``).
+      2. **Enrich** — Joins the full semantic context from the LogLoom
+         enrichment index when ``logloom.node_id`` is present.  Documents
+         without a node ID pass through unchanged.
+
+    Compatible with every Elastic data collection path:
+      - Filebeat (Docker, Kubernetes autodiscovery, file input)
+      - Elastic Agent (Fleet-managed, via ``@custom`` pipeline hook)
+      - Logstash
+      - OpenTelemetry Collector (Elasticsearch exporter)
+      - Fluent Bit
     """
     return {
-        "description": "LogLoom code-context enrichment pipeline — joins "
-                       "semantic metadata from the logloom enrichment index "
-                       "onto incoming log events.",
+        "description": "LogLoom code-context enrichment pipeline — normalises "
+                       "field names from Beat transports and joins semantic "
+                       "metadata from the logloom enrichment index onto "
+                       "incoming log events.",
         "processors": [
+            {
+                "rename": {
+                    "description": "Normalise underscore → dot notation "
+                                   "for Beat/Filebeat transports",
+                    "field": "logloom_node_id",
+                    "target_field": "logloom.node_id",
+                    "ignore_missing": True,
+                }
+            },
             {
                 "enrich": {
                     "description": "Join LogLoom graph context by node_id",
