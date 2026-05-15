@@ -1,15 +1,9 @@
-# LogLoom Release — Build, validate, and publish to PyPI on version tag push.
-# Adapted from the Elastro release pipeline pattern.
-#
-# Trigger: push a tag like `v0.3.0` to main.
-# Pipeline: lint → test (multi-Python) → build wheel → create GitHub Release → publish to PyPI.
-
-name: Release to PyPI
+name: Automate PyPI Release via ReleaseFlow
 
 on:
   push:
-    tags:
-      - 'v*'
+    branches:
+      - main
 
 permissions:
   contents: write
@@ -60,7 +54,7 @@ jobs:
 
   # ── Build and publish ───────────────────────────────────────────────────────
   release:
-    name: Build & Publish
+    name: Build, Scan, and Publish
     runs-on: ubuntu-latest
     needs: validate
     steps:
@@ -78,86 +72,96 @@ jobs:
           python -m pip install --upgrade pip
           pip install build twine
 
-      - name: Extract version from tag
-        id: version
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.21'
+
+      - name: Run ReleaseFlow Generator
+        id: rflow
+        env:
+          RFLOW_ADO_PAT: ${{ secrets.RFLOW_ADO_PAT }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          RFLOW_AI_PROVIDER: "gemini"
         run: |
-          # Strip the 'v' prefix from the tag: v0.3.0 → 0.3.0
-          VERSION="${GITHUB_REF_NAME#v}"
+          # 1. Install ReleaseFlow CLI from Azure DevOps
+          echo "Fetching ReleaseFlow binary directly from Azure DevOps Artifacts..."
+          ORG="mentat-automation"
+          PROJECT="vorsam"
+          
+          echo "Since we are bypassing the bash install.sh, we will clone the rflow repo and build it locally in the runner to guarantee architecture compatibility."
+          
+          # We will clone the releaseflow repo using the PAT
+          git clone -b master https://$RFLOW_ADO_PAT@dev.azure.com/$ORG/$PROJECT/_git/ReleaseFlow /tmp/ReleaseFlow
+          cd /tmp/ReleaseFlow
+          
+          # Build the rflow binary
+          echo "Building rflow from source..."
+          make build
+          
+          # Move to path
+          sudo cp bin/rflow /usr/local/bin/rflow
+          sudo chmod +x /usr/local/bin/rflow
+          
+          # Verify
+          rflow version
+          
+          # Move back to workspace
+          cd $GITHUB_WORKSPACE
+          
+          # 2. Install Dependencies (Syft for SBOM, Trivy for Scans)
+          curl -sSfL https://raw.githubusercontent.com/anchore/syft/main/install.sh | sh -s -- -b /usr/local/bin
+          curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh | sh -s -- -b /usr/local/bin
+          
+          # 3. Bootstrap Version and Generate Manifest
+          # Extract current version from pyproject.toml since it's the source of truth
+          CURRENT_VERSION=$(grep "^version =" pyproject.toml | awk -F'"' '{print $2}')
+          echo "$CURRENT_VERSION" > .version
+          echo "Extracted $CURRENT_VERSION from pyproject.toml. Triggering ReleaseFlow bump..."
+          
+          rflow manifest generate --config release.yaml --app-dir . --bump patch
+          
+          # Extract the new version written to .version by rflow
+          VERSION=$(cat .version)
           echo "VERSION=$VERSION" >> $GITHUB_ENV
-          echo "version=$VERSION" >> $GITHUB_OUTPUT
-          echo "Releasing version: $VERSION"
+          
+          # Generate SBOM
+          rflow sbom generate --manifest manifests/release-manifest.yaml
+          
+          # Scan for vulnerabilities
+          rflow scan directory --manifest manifests/release-manifest.yaml
+          
+          # Generate Release Notes
+          # We will use ReleaseFlow's AI notes generator to parse commit history for this version
+          rflow notes generate --version $VERSION --out-external release-notes.md --ai
 
-      - name: Verify version consistency
+      - name: Sync Version and Build Package
         run: |
-          # Ensure pyproject.toml version matches the tag
-          TOML_VERSION=$(grep "^version = " pyproject.toml | awk -F'"' '{print $2}')
-          if [ "$TOML_VERSION" != "${{ env.VERSION }}" ]; then
-            echo "::error::Version mismatch: tag=${{ env.VERSION }} vs pyproject.toml=$TOML_VERSION"
-            echo "Update pyproject.toml to match the tag before releasing."
-            exit 1
-          fi
-
-          # Ensure __version__.py matches
-          PY_VERSION=$(grep "__version__" src/logloom/__version__.py | awk -F'"' '{print $2}')
-          if [ "$PY_VERSION" != "${{ env.VERSION }}" ]; then
-            echo "::error::Version mismatch: tag=${{ env.VERSION }} vs __version__.py=$PY_VERSION"
-            exit 1
-          fi
-
-          echo "Version ${{ env.VERSION }} is consistent across all sources."
-
-      - name: Build distribution
-        run: python -m build
-
-      - name: Verify package contents
-        run: |
-          echo "=== sdist contents ==="
-          tar tzf dist/*.tar.gz | head -30
-          echo ""
-          echo "=== wheel contents ==="
-          unzip -l dist/*.whl | head -30
-
-      - name: Generate release notes
-        id: notes
-        run: |
-          # Auto-generate release notes from recent commits
-          cat > release-notes.md << 'NOTES_EOF'
-          ## LogLoom v${{ env.VERSION }}
-
-          ### What's New
-
-          **Multi-Language AST Scanning**
-          - Production-hardened Go scanner: zerolog chain resolution, method receiver qualification, string concatenation flattening, switch/closure detection.
-          - Production-hardened TypeScript/JavaScript scanner: class method qualification, try/catch/switch context, async function detection, template literal normalization.
-
-          **Observability Ecosystem**
-          - Elasticsearch index template and component template generation (`logloom es map`).
-          - NDJSON bulk export for offline ES ingestion (`logloom es export`).
-          - OpenTelemetry Log Processor bridge (`LogLoomOTELProcessor`).
-
-          **CI/CD Integration**
-          - Reusable GitHub Action (`action.yml`) for CI pipelines.
-          - Self-dogfooding CI workflow with multi-language scanner validation.
-
-          **Installation**
-          ```bash
-          pip install logloom
-          pip install "logloom[build]"
-          pip install "logloom[elasticsearch,otel]"
-          ```
-
-          Full changelog: https://github.com/Fremen-Labs/logloom/compare/v0.2.0...v${{ env.VERSION }}
-          NOTES_EOF
+          # Update pyproject.toml dynamically
+          sed -i "s/^version = \".*\"/version = \"${{ env.VERSION }}\"/" pyproject.toml
+          # Update __version__.py dynamically
+          sed -i "s/__version__ = \".*\"/__version__ = \"${{ env.VERSION }}\"/" src/logloom/__version__.py
+          
+          # Commit the version bump back to the repository so subsequent runs do not stick on old versions
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+          git add pyproject.toml src/logloom/__version__.py
+          # Use || true to prevent failure if it's already committed (e.g. manual bump)
+          git commit -m "chore(release): bump version to ${{ env.VERSION }} [skip ci]" || true
+          git push origin main || true
+          
+          # Build wheel and sdist
+          python -m build
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ github.ref_name }}
-          name: LogLoom v${{ env.VERSION }}
+          tag_name: v${{ env.VERSION }}
+          name: Release v${{ env.VERSION }}
           body_path: release-notes.md
-          draft: false
-          prerelease: false
           files: |
+            security/sbom/*
+            security/scans/*
             dist/*
 
       - name: Publish to PyPI

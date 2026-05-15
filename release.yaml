@@ -1,0 +1,110 @@
+schemaVersion: v1
+project:
+  name: logloom
+  owner: fremenlabs
+  repo:
+    provider: generic
+    url: https://github.com/Fremen-Labs/logloom
+    defaultBranch: main
+    branch: ""
+  releaseFlowRepo:
+    provider: ""
+    url: https://dev.azure.com/mentat-automation/vorsam/_git/ReleaseFlow
+    defaultBranch: ""
+    branch: main
+versioning:
+  model: semver
+  tagPrefix: v
+  sourceOfTruth: release-flow
+  allowManualLevelOnMaster: false
+  releaseLevels: {}
+registry:
+  type: acr
+  host: na
+  auth:
+    method: ""
+    reference: ""
+services:
+  - name: logloom
+    type: directory
+    image: ""
+    path: .
+    dockerfile: ""
+    build:
+      args: {}
+      labels: {}
+    publish:
+      enabled: true
+      tags:
+        - '{{.Version}}'
+        - latest
+    security:
+      sbom:
+        enabled: true
+        format: spdx-json
+        outputPath: security/sbom/{{.Service}}-{{.Version}}.spdx.json
+      scan:
+        enabled: true
+        tool: trivy
+        severityFail:
+          - CRITICAL
+          - HIGH
+        ignoreFile: ""
+        outputPath: security/scans/{{.Service}}-{{.Version}}.trivy.json
+        reportStorage:
+          type: ""
+          git:
+            url: ""
+            branch: ""
+            path: ""
+manifest:
+  enabled: true
+  latestPath: manifests/release-manifest.yaml
+  versionedPath: manifests/releases/release-{{.Version}}.yaml
+  include:
+    git: true
+    appCommit: true
+    security: true
+    signatures: true
+signing:
+  git:
+    enabled: false
+    method: ""
+    keyIdEnv: ""
+    passphraseEnv: ""
+    privateKeyEnv: ""
+  images:
+    enabled: true
+    method: cosign
+    keyProvider: azurekms
+    keyRef: azurekms://fremen-vault.vault.azure.net/logloom
+    tlogUpload: false
+    annotations: {}
+secrets:
+  provider: ""
+  vaultName: ""
+notes:
+  internal:
+    sourceDir: ""
+    outputPath: ""
+  external:
+    sourceDir: ""
+    outputPath: ""
+  changelog:
+    mode: ""
+    conventionalCommits: false
+policy:
+  enabled: true
+  gates:
+    requireSignedGitTag: false
+    requireSignedImages: true
+    requireSbom: true
+    requireScan: true
+    failOnSeverities:
+      - CRITICAL
+  exceptions:
+    allowedCves: []
+    allowUnfixed: false
+promotion:
+  enabled: false
+  environments: []
