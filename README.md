@@ -95,7 +95,7 @@ and actually get meaningful answers.
 
 - **Zero runtime overhead** when graph is missing (graceful fallback)
 - **Stable node IDs** that survive refactors
-- **Multi-language Scanners**: A nifty Tree-sitter AST parsing for Python, Go  like zerolog, zap, slog, and TypeScript/JavaScript like winston, pino, console.
+- **Multi-language Scanners**: A nifty Tree-sitter AST parsing for Python (structlog, logging), Go (stdlib log, slog, zap, logrus, zerolog), and TypeScript/JavaScript (console, winston, pino, bunyan, NestJS Logger, log4js).
 - **Native OpenTelemetry Bridge**: Plug-and-play like a Game Boy cartridge. Slap it in and your spans are magically annotated.
 - **Elasticsearch Shipper & Mappings**: Auto-generates ECS-compliant component templates and ships your graph directly into Elasticsearch via `_bulk`.
 - **GitHub Action Native**: Just `uses: fremenlabs/logloom@v0.3.0` in your CI pipeline.
@@ -145,6 +145,7 @@ We just dialed into the mainframe and dropped the Ecosystem update:
 ```
 
 - **`logloom graph show`** — explore the graph as a rich tree
+- **`logloom graph find`** — search for a node by message or location
 - **`logloom lint`** — catches untracked log sites
 - **`logloom diff`** — detect graph regressions in CI
 
