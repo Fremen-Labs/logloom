@@ -50,7 +50,10 @@ class TypeScriptScanner:
             # Try TypeScript grammar first
             try:
                 import tree_sitter_typescript as ts_typescript
-                self.ts_language = Language(ts_typescript.language_typescript())
+                try:
+                    self.ts_language = Language(ts_typescript.language_typescript())
+                except TypeError:
+                    self.ts_language = Language(ts_typescript.language_typescript(), "typescript")
                 self.ts_parser = Parser(self.ts_language)
                 self.ts_query = Query(self.ts_language, TS_LOGS_QUERY)
                 self._ts_available = True
@@ -60,7 +63,10 @@ class TypeScriptScanner:
             # Try JavaScript grammar
             try:
                 import tree_sitter_javascript as ts_javascript
-                self.js_language = Language(ts_javascript.language())
+                try:
+                    self.js_language = Language(ts_javascript.language())
+                except TypeError:
+                    self.js_language = Language(ts_javascript.language(), "javascript")
                 self.js_parser = Parser(self.js_language)
                 self.js_query = Query(self.js_language, TS_LOGS_QUERY)
                 self._js_available = True
@@ -103,11 +109,17 @@ class TypeScriptScanner:
         except (IOError, OSError):
             return []
 
-        from tree_sitter import QueryCursor
+        try:
+            from tree_sitter import QueryCursor
+        except ImportError:
+            QueryCursor = None
 
         tree = parser.parse(source)
-        cursor = QueryCursor(query)
-        matches = cursor.matches(tree.root_node)
+        if QueryCursor is not None:
+            cursor = QueryCursor(query)
+            matches = cursor.matches(tree.root_node)
+        else:
+            matches = query.matches(tree.root_node)
 
         sites = []
         seen_lines = set()
