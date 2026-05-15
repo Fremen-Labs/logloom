@@ -167,3 +167,202 @@ def login():
     for n in graph.nodes.values():
         if n.message_template == "[REDACTED]":
             assert "auth" in n.semantic_tags  # from "login" function name
+
+
+# ── Go call-graph edge resolution tests (Phase 4d) ───────────────────────────
+
+GO_COBRA_APP = '''
+package cmd
+
+import (
+    "fmt"
+    "log"
+    "log/slog"
+
+    "github.com/spf13/cobra"
+)
+
+func validateManifest(path string) error {
+    slog.Info("Validating manifest", "path", path)
+    return nil
+}
+
+func executeSecurityScan(target string) {
+    slog.Info("Running security scan", "target", target)
+}
+
+var scanCmd = &cobra.Command{
+    Use: "scan",
+    RunE: func(cmd *cobra.Command, args []string) error {
+        slog.Info("Starting scan command")
+        if err := validateManifest("release.yaml"); err != nil {
+            return err
+        }
+        executeSecurityScan("my-image:latest")
+        return nil
+    },
+}
+
+func setupServer() {
+    defer func() {
+        slog.Info("Server cleanup complete")
+        if r := recover(); r != nil {
+            log.Printf("Recovered from panic: %v", r)
+        }
+    }()
+    slog.Info("Starting server setup")
+    executeSecurityScan("server-image")
+}
+
+func orchestrate() {
+    action := func() error {
+        slog.Info("Executing orchestration action")
+        validateManifest("config.yaml")
+        return nil
+    }
+    _ = action()
+    slog.Info("Orchestration complete")
+}
+
+func init() {
+    log.Println("Initializing scan command")
+}
+'''
+
+
+def test_go_cobra_struct_field_closure_edges(tmp_path: Path):
+    """Cobra RunE: func(){} struct field closures should produce call-graph edges.
+
+    The RunE closure calls validateManifest and executeSecurityScan.
+    Nodes in those functions should have call_parents, and the closure's
+    log nodes should have call_children.
+    """
+    app_file = tmp_path / "scan.go"
+    app_file.write_text(GO_COBRA_APP)
+
+    builder = GraphBuilder()
+    graph = builder.build(
+        [app_file],
+        project_name="test-cobra",
+        enable_tags=False,
+        enable_call_graph=True,
+        enable_git=False,
+        languages=["go"],
+    )
+
+    assert len(graph.nodes) > 0, "Should find Go log nodes"
+
+    # Count nodes with edges
+    nodes_with_edges = sum(
+        1 for n in graph.nodes.values()
+        if n.call_parents or n.call_children
+    )
+    total = len(graph.nodes)
+    pct = (nodes_with_edges / total * 100) if total else 0
+
+    # The RunE closure should produce edges
+    assert nodes_with_edges > 0, (
+        f"Expected some nodes with call-graph edges, got 0/{total}"
+    )
+
+    # Validate specific edges: validateManifest should have parents
+    validate_nodes = [
+        n for n in graph.nodes.values()
+        if n.function == "validateManifest"
+    ]
+    # validateManifest is called from RunE closure AND orchestrate closure
+    for vn in validate_nodes:
+        assert len(vn.call_parents) > 0, (
+            f"validateManifest node should have call_parents from closures"
+        )
+
+
+def test_go_defer_closure_edges(tmp_path: Path):
+    """defer func() { body }() should walk the closure body for edges."""
+    app_file = tmp_path / "defer.go"
+    app_file.write_text(GO_COBRA_APP)
+
+    builder = GraphBuilder()
+    graph = builder.build(
+        [app_file],
+        enable_tags=False,
+        enable_call_graph=True,
+        enable_git=False,
+        languages=["go"],
+    )
+
+    # setupServer has a defer closure. The log inside the defer should
+    # be attributed to setupServer. setupServer also calls executeSecurityScan,
+    # so its nodes should have call_children.
+    setup_nodes = [
+        n for n in graph.nodes.values()
+        if n.function == "setupServer"
+    ]
+    assert len(setup_nodes) > 0, "Should find setupServer log nodes"
+
+    # At least one setupServer node should have call_children
+    # (because setupServer calls executeSecurityScan)
+    has_children = any(len(n.call_children) > 0 for n in setup_nodes)
+    assert has_children, (
+        "setupServer should have call_children pointing to executeSecurityScan"
+    )
+
+
+def test_go_var_assigned_closure_edges(tmp_path: Path):
+    """handler := func() { calls... } should inline calls into enclosing function."""
+    app_file = tmp_path / "var_closure.go"
+    app_file.write_text(GO_COBRA_APP)
+
+    builder = GraphBuilder()
+    graph = builder.build(
+        [app_file],
+        enable_tags=False,
+        enable_call_graph=True,
+        enable_git=False,
+        languages=["go"],
+    )
+
+    # orchestrate has a var-assigned closure (action := func(){...}).
+    # The closure calls validateManifest, so orchestrate should have
+    # call_children pointing to validateManifest.
+    orch_nodes = [
+        n for n in graph.nodes.values()
+        if n.function == "orchestrate"
+    ]
+    assert len(orch_nodes) > 0, "Should find orchestrate log nodes"
+
+    has_children = any(len(n.call_children) > 0 for n in orch_nodes)
+    assert has_children, (
+        "orchestrate should have call_children from var-assigned closure"
+    )
+
+
+def test_go_call_graph_edge_coverage_minimum(tmp_path: Path):
+    """Overall Go call-graph edge coverage should exceed 60% on a realistic app."""
+    app_file = tmp_path / "app.go"
+    app_file.write_text(GO_COBRA_APP)
+
+    builder = GraphBuilder()
+    graph = builder.build(
+        [app_file],
+        enable_tags=False,
+        enable_call_graph=True,
+        enable_git=False,
+        languages=["go"],
+    )
+
+    total = len(graph.nodes)
+    assert total > 0
+
+    nodes_with_edges = sum(
+        1 for n in graph.nodes.values()
+        if n.call_parents or n.call_children
+    )
+    pct = nodes_with_edges / total * 100
+
+    # With defer, var-closure, and struct-field improvements,
+    # we should be well above the old 66% baseline
+    assert pct >= 60, (
+        f"Expected >=60% edge coverage, got {pct:.0f}% ({nodes_with_edges}/{total})"
+    )
+

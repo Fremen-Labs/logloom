@@ -124,6 +124,31 @@ class CallGraphResolver:
                 return True
             return False
 
+        # Step 2c: Build a bare → qualified index for call_map keys too.
+        # This covers cases where init() calls functions that exist in the graph.
+        caller_bare_to_qualified: Dict[str, List[str]] = {}
+        for caller_name in call_map:
+            if "." in caller_name:
+                bare = caller_name.rsplit(".", 1)[1]
+                caller_bare_to_qualified.setdefault(bare, []).append(caller_name)
+
+        def _get_caller_callees(func_name: str) -> Set[str]:
+            """Get all callees for a function, trying exact and qualified forms."""
+            result: Set[str] = set()
+            # Exact match
+            if func_name in call_map:
+                result |= call_map[func_name]
+            # If the function is qualified (Type.Method), also check bare form
+            if "." in func_name:
+                bare = func_name.rsplit(".", 1)[1]
+                if bare in call_map:
+                    result |= call_map[bare]
+            # If the function is bare, check qualified forms in call_map
+            if "." not in func_name and func_name in caller_bare_to_qualified:
+                for qualified in caller_bare_to_qualified[func_name]:
+                    result |= call_map.get(qualified, set())
+            return result
+
         # Step 3: For each node, populate call_parents and call_children
         new_nodes: Dict[str, GraphNode] = {}
         for node_id, node in graph.nodes.items():
@@ -138,7 +163,7 @@ class CallGraphResolver:
                             parents.add(parent_node_id)
 
             # Find child functions (functions called by this node's function)
-            for callee in call_map.get(node.function, set()):
+            for callee in _get_caller_callees(node.function):
                 if callee != node.function:
                     for child_node_id in _resolve_func_nodes(callee):
                         children.add(child_node_id)
@@ -264,7 +289,8 @@ class _GoCallGraphResolver:
         self._walk_go_declarations(tree.root_node, call_map, source)
 
     def _walk_go_declarations(self, node, call_map: Dict[str, Set[str]], source: bytes):
-        """Find function and method declarations, extract call edges from their bodies."""
+        """Find function/method declarations and package-level closures,
+        extract call edges from their bodies."""
         if node.type == "function_declaration":
             name_node = node.child_by_field_name("name")
             if name_node:
@@ -293,9 +319,54 @@ class _GoCallGraphResolver:
                     existing = call_map.get(qualified, set())
                     call_map[qualified] = existing | callees
 
+        elif node.type == "var_declaration":
+            # Package-level var declarations may contain Cobra command
+            # structs with RunE/Run/PersistentPreRunE closures:
+            #   var scanCmd = &cobra.Command{ RunE: func() { ... } }
+            # Extract calls from any func_literals inside and attribute
+            # them using the variable name as the caller key.
+            self._extract_var_decl_closures(node, call_map, source)
+
         # Recurse into children (handles nested structures, init functions, etc.)
         for child in node.children:
             self._walk_go_declarations(child, call_map, source)
+
+    def _extract_var_decl_closures(
+        self, var_decl_node, call_map: Dict[str, Set[str]], source: bytes
+    ):
+        """Extract calls from func_literals inside package-level var declarations.
+
+        Handles the Cobra pattern:
+            var scanCmd = &cobra.Command{
+                RunE: func(cmd *cobra.Command, args []string) error {
+                    validateManifest("release.yaml")
+                    ...
+                },
+            }
+
+        The go_scanner assigns log calls inside these closures to '<module>'
+        since there's no enclosing function_declaration. We use '<module>' as
+        the caller key so the call_graph resolver can match them.
+        """
+        func_literals = []
+        self._find_func_literals(var_decl_node, func_literals)
+
+        for fl in func_literals:
+            body = fl.child_by_field_name("body")
+            if body:
+                callees = self._extract_go_callees(body, source)
+                if callees:
+                    # Use '<module>' to match what go_scanner assigns
+                    existing = call_map.get("<module>", set())
+                    call_map["<module>"] = existing | callees
+
+    def _find_func_literals(self, node, results: list):
+        """Recursively find all func_literal nodes within a subtree."""
+        if node.type == "func_literal":
+            results.append(node)
+            return  # Don't recurse into nested func_literals
+        for child in node.children:
+            self._find_func_literals(child, results)
 
     def _extract_go_callees(self, body_node, source: bytes) -> Set[str]:
         """Walk a function body to find all call targets including goroutines.
@@ -306,6 +377,9 @@ class _GoCallGraphResolver:
           - Goroutine named: go serveControlPlane(ch)   → "serveControlPlane"
           - Goroutine method: go p.probeModel(ctx, fm)  → "probeModel"
           - Goroutine closure: go func() { calls... }() → walks closure body
+          - Defer closure:   defer func() { calls }()   → walks closure body
+          - Var-assigned closure: h := func(){ calls }  → walks closure body
+          - Struct field closure: RunE: func(){ calls }  → walks closure body
         """
         callees: Set[str] = set()
         self._walk_calls(body_node, callees, source)
@@ -316,50 +390,122 @@ class _GoCallGraphResolver:
         if node.type == "call_expression":
             fn = node.child_by_field_name("function")
             if fn:
-                callee = self._resolve_callee(fn, source)
-                if callee and callee not in _GO_BUILTIN_SKIP:
-                    callees.add(callee)
+                # If the function is a func_literal being immediately invoked
+                # (e.g. func(){ ... }()), walk the closure body.
+                if fn.type == "func_literal":
+                    closure_body = fn.child_by_field_name("body")
+                    if closure_body:
+                        self._walk_calls(closure_body, callees, source)
+                else:
+                    callee = self._resolve_callee(fn, source)
+                    if callee and callee not in _GO_BUILTIN_SKIP:
+                        callees.add(callee)
 
         elif node.type == "go_statement":
-            # Goroutine launch — three patterns:
-            #
-            # Pattern A: go namedFunc(args)
-            #   go_statement → call_expression → identifier
-            #
-            # Pattern B: go obj.Method(args)
-            #   go_statement → call_expression → selector_expression
-            #
-            # Pattern C: go func() { body }()
-            #   go_statement → call_expression → func_literal (+ argument_list)
-            #   The closure body contains calls that should be attributed
-            #   to the enclosing function as goroutine-spawned edges.
-            for child in node.children:
-                if child.type == "call_expression":
-                    fn = child.child_by_field_name("function")
-                    if fn:
-                        if fn.type == "func_literal":
-                            # Pattern C: inline goroutine closure.
-                            # Walk into the closure body to extract the calls
-                            # it makes — these are concurrent work spawned by
-                            # the enclosing function.
-                            closure_body = fn.child_by_field_name("body")
-                            if closure_body:
-                                self._walk_calls(closure_body, callees, source)
-                        else:
-                            # Pattern A or B: named function / method call
-                            callee = self._resolve_callee(fn, source)
-                            if callee and callee not in _GO_BUILTIN_SKIP:
-                                callees.add(callee)
-            # Don't recurse into go_statement children normally —
-            # we already handled all child patterns above.
+            # Goroutine launch — three patterns (A/B/C)
+            self._walk_closure_or_call_statement(node, callees, source)
             return
 
-        # Recurse into children. Skip standalone func_literals (assigned closures
-        # like `handler := func() { ... }`) — those get their own graph entry.
-        # But goroutine closures are handled above in the go_statement branch.
+        elif node.type == "defer_statement":
+            # Defer launch — same three patterns as goroutine:
+            #   defer namedFunc()          → direct edge
+            #   defer obj.Method()         → method edge
+            #   defer func() { body }()    → walk closure body
+            self._walk_closure_or_call_statement(node, callees, source)
+            return
+
+        # Recurse into children.
+        # For func_literals: walk into them if they are assigned to a variable
+        # (short_var_declaration / assignment_statement) or used as a struct
+        # field value (keyed_element / literal_value). These closures execute
+        # in the enclosing function's scope and their calls should be edges.
         for child in node.children:
-            if child.type != "func_literal":
+            if child.type == "func_literal":
+                if self._is_inlinable_closure(child):
+                    closure_body = child.child_by_field_name("body")
+                    if closure_body:
+                        self._walk_calls(closure_body, callees, source)
+                # else: standalone func_literal that gets its own graph entry
+            else:
                 self._walk_calls(child, callees, source)
+
+    def _walk_closure_or_call_statement(
+        self, node, callees: Set[str], source: bytes
+    ):
+        """Handle go_statement and defer_statement uniformly.
+
+        Both share three patterns:
+          A: go/defer namedFunc(args)
+          B: go/defer obj.Method(args)
+          C: go/defer func() { body }()   → walk closure body
+        """
+        for child in node.children:
+            if child.type == "call_expression":
+                fn = child.child_by_field_name("function")
+                if fn:
+                    if fn.type == "func_literal":
+                        closure_body = fn.child_by_field_name("body")
+                        if closure_body:
+                            self._walk_calls(closure_body, callees, source)
+                    else:
+                        callee = self._resolve_callee(fn, source)
+                        if callee and callee not in _GO_BUILTIN_SKIP:
+                            callees.add(callee)
+
+    def _is_inlinable_closure(self, func_literal_node) -> bool:
+        """Determine if a func_literal's calls should be inlined into the enclosing function.
+
+        Returns True for closures that are:
+          - Assigned to a variable:  handler := func() { ... }
+          - Used as a struct field:  RunE: func(cmd, args) error { ... }
+          - Passed as a callback argument: http.HandleFunc("/", func(w,r){ ... })
+
+        Returns False for standalone closures that would get their own graph entry
+        (this shouldn't happen in practice since standalone func_literals without
+        context are rare).
+        """
+        # Walk up through intermediate AST wrapper nodes to find the
+        # meaningful parent. In Go tree-sitter, func_literal's direct
+        # parent is often an intermediate like expression_list or
+        # literal_value, not the semantic parent we're looking for.
+        #
+        # Example AST chains:
+        #   handler := func(){}   → func_literal → expression_list → short_var_declaration
+        #   RunE: func(){}        → func_literal → keyed_element
+        #   doWork(func(){})      → func_literal → argument_list
+        #   var h = func(){}      → func_literal → expression_list → var_spec
+        #   return func(){}       → func_literal → expression_list → return_statement
+        _INTERMEDIATE_TYPES = frozenset({
+            "expression_list", "literal_value", "parenthesized_expression",
+        })
+
+        current = func_literal_node.parent
+        # Walk through up to 3 intermediate wrappers
+        for _ in range(4):
+            if current is None:
+                return False
+
+            if current.type in _INTERMEDIATE_TYPES:
+                current = current.parent
+                continue
+
+            # Now `current` should be the semantic parent
+            if current.type in (
+                "short_var_declaration",
+                "assignment_statement",
+                "keyed_element",
+                "argument_list",
+                "var_spec",
+                "return_statement",
+                "var_declaration",
+            ):
+                return True
+
+            # If we hit a statement or declaration we don't recognize,
+            # it's not an inlinable closure
+            return False
+
+        return False
 
 
     def _resolve_callee(self, fn_node, source: bytes) -> Optional[str]:
@@ -390,11 +536,16 @@ class _GoCallGraphResolver:
                 if operand_text in _GO_STDLIB_SKIP:
                     return None
 
-                # Check if the operand looks like a package (starts with lowercase)
-                # vs a variable/receiver (could be either case, but we try both)
                 # Return just the method name — the graph resolver will match
-                # against both "Method" and "Type.Method" forms
+                # against both "Method" and "Type.Method" forms via the
+                # bare_to_qualified index
                 return method_name
+
+        # Type assertion call: x.(Type).Method()
+        # AST: selector_expression → type_assertion_expression → field_identifier
+        if fn_node.type == "type_assertion_expression":
+            # This is rare but can appear in chained patterns
+            return None
 
         return None
 
