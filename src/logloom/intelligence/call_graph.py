@@ -15,7 +15,11 @@ Go support (Phase 4a) handles:
 from __future__ import annotations
 
 import tree_sitter_python as tspython
-from tree_sitter import Language, Parser, Query, QueryCursor
+from tree_sitter import Language, Parser, Query
+try:
+    from tree_sitter import QueryCursor
+except ImportError:
+    QueryCursor = None
 from pathlib import Path
 from typing import Dict, List, Optional, Set, Tuple
 
@@ -56,7 +60,10 @@ class CallGraphResolver:
     """
 
     def __init__(self):
-        self.language = Language(tspython.language())
+        try:
+            self.language = Language(tspython.language())
+        except TypeError:
+            self.language = Language(tspython.language(), "python")
         self.parser = Parser(self.language)
         self._call_query = Query(self.language, _CALL_IN_FUNCTION_QUERY)
 
@@ -181,8 +188,11 @@ class CallGraphResolver:
 
     def _extract_python_callees(self, body_node, source: bytes) -> Set[str]:
         """Use QueryCursor to find all function calls within a body node."""
-        cursor = QueryCursor(self._call_query)
-        matches = cursor.matches(body_node)
+        if QueryCursor is not None:
+            cursor = QueryCursor(self._call_query)
+            matches = cursor.matches(body_node)
+        else:
+            matches = self._call_query.matches(body_node)
 
         callees: Set[str] = set()
         for _, captures in matches:
@@ -236,7 +246,10 @@ class _GoCallGraphResolver:
 
     def __init__(self):
         import tree_sitter_go as tsgo
-        self.language = Language(tsgo.language())
+        try:
+            self.language = Language(tsgo.language())
+        except TypeError:
+            self.language = Language(tsgo.language(), "go")
         self.parser = Parser(self.language)
 
     def extract_calls(self, file_path: Path, call_map: Dict[str, Set[str]]):

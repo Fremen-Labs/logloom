@@ -98,7 +98,10 @@ class GoScanner:
         try:
             import tree_sitter_go as tsgo
             from tree_sitter import Language, Parser, Query
-            self.language = Language(tsgo.language())
+            try:
+                self.language = Language(tsgo.language())
+            except TypeError:
+                self.language = Language(tsgo.language(), "go")
             self.parser = Parser(self.language)
             self.query = Query(self.language, GO_LOGS_QUERY)
             self._available = True
@@ -127,11 +130,17 @@ class GoScanner:
         except (IOError, OSError):
             return []
 
-        from tree_sitter import QueryCursor
+        try:
+            from tree_sitter import QueryCursor
+        except ImportError:
+            QueryCursor = None
 
         tree = self.parser.parse(source)
-        cursor = QueryCursor(self.query)
-        matches = cursor.matches(tree.root_node)
+        if QueryCursor is not None:
+            cursor = QueryCursor(self.query)
+            matches = cursor.matches(tree.root_node)
+        else:
+            matches = self.query.matches(tree.root_node)
 
         # ── Two-pass matching ─────────────────────────────────────────────
         # Pass 1: Collect all candidate matches keyed by line number.

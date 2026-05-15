@@ -1,5 +1,9 @@
 import tree_sitter_python as tspython
-from tree_sitter import Language, Parser, Query, QueryCursor
+from tree_sitter import Language, Parser, Query
+try:
+    from tree_sitter import QueryCursor
+except ImportError:
+    QueryCursor = None
 from pathlib import Path
 from typing import List, Optional
 from .base import LogCallSite
@@ -15,7 +19,10 @@ _VALID_LOG_METHODS = frozenset({
 
 class PythonScanner:
     def __init__(self):
-        self.language = Language(tspython.language())
+        try:
+            self.language = Language(tspython.language())
+        except TypeError:
+            self.language = Language(tspython.language(), "python")
         self.parser = Parser(self.language)
         self.query = Query(self.language, PYTHON_LOGS_QUERY)
 
@@ -27,8 +34,11 @@ class PythonScanner:
             source = f.read()
 
         tree = self.parser.parse(source)
-        cursor = QueryCursor(self.query)
-        matches = cursor.matches(tree.root_node)
+        if QueryCursor is not None:
+            cursor = QueryCursor(self.query)
+            matches = cursor.matches(tree.root_node)
+        else:
+            matches = self.query.matches(tree.root_node)
 
         sites = []
         for match in matches:

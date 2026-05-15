@@ -27,7 +27,7 @@ graph LR
 ```
 
 ### Build Phase (`logloom build`)
-- **Multi-Language Tree-sitter Scanners**: Python, Go, and TypeScript/JavaScript supported natively. Parses the AST looking for standard and third-party logging calls (e.g., `slog`, `zap`, `zerolog`, `pino`, `winston`).
+- **Multi-Language Tree-sitter Scanners**: Python, Go, and TypeScript/JavaScript supported natively. Parses the AST looking for standard and third-party logging calls (e.g., `structlog`, `slog`, `zap`, `zerolog`, `logrus`, `pino`, `winston`, `bunyan`, `log4js`).
 - Hybrid stable node ID generation.
 - Semantic tag inference and control flow extraction (`try/catch`, closures, goroutines).
 - Graph construction (`logloom-graph.json`).
