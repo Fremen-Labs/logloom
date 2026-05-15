@@ -85,11 +85,16 @@ _GO_FMT_VERB_RE = re.compile(r'%[+\-#0 ]*(?:\*|\d+)?(?:\.(?:\*|\d+))?[sdvfteqxXo
 # Known zap package identifiers
 _ZAP_PKG_NAMES = frozenset({"zap"})
 
+# Packages whose .Error() / .Errorf() / .Fatal() etc. are NOT log calls.
+# http.Error(w, msg, code), errors.New("msg"), fmt.Errorf("msg"), etc.
+_NON_LOG_PACKAGES = frozenset({"http", "errors", "fmt", "os", "io", "json", "strings", "bytes", "strconv"})
+
 
 class GoScanner:
     """Tree-sitter-based scanner for Go log calls."""
 
-    def __init__(self):
+    def __init__(self, exclude_tests: bool = True):
+        self._exclude_tests = exclude_tests
         try:
             import tree_sitter_go as tsgo
             from tree_sitter import Language, Parser, Query
@@ -110,6 +115,10 @@ class GoScanner:
         if not self._available:
             return []
         if file_path.suffix != ".go":
+            return []
+        # Skip test files — their assertions (t.Errorf, t.Fatalf) are not
+        # runtime log sites and will never match production logs.
+        if self._exclude_tests and file_path.name.endswith("_test.go"):
             return []
 
         try:
@@ -155,6 +164,13 @@ class GoScanner:
             # is a field constructor, not a log call. Detect by checking
             # if the call_expression's operand is a zap package identifier.
             if self._is_zap_field_constructor(method_node):
+                continue
+
+            # ── Non-log package call elimination ──────────────────────────
+            # http.Error(), errors.New(), fmt.Errorf(), os.Exit(), etc.
+            # are stdlib calls that share method names with log libraries
+            # but are NOT log emission points.
+            if self._is_non_log_package_call(method_node):
                 continue
 
             # ── Nested call false-positive elimination ────────────────────
@@ -247,6 +263,33 @@ class GoScanner:
         if operand and operand.type == "identifier":
             pkg_name = operand.text.decode("utf-8")
             if pkg_name in _ZAP_PKG_NAMES:
+                return True
+
+        return False
+
+    def _is_non_log_package_call(self, method_node) -> bool:
+        """Check if this call belongs to a known non-logging stdlib package.
+
+        Filters out false positives like:
+          - http.Error(w, "msg", 400)   — HTTP response, not a log call
+          - errors.New("msg")           — error construction
+          - fmt.Errorf("msg")           — error formatting
+          - os.Exit(1)                  — process exit
+
+        The AST pattern is:
+            call_expression
+              selector_expression
+                identifier "http"           ← package is a known non-log pkg
+                field_identifier "Error"    ← method name matched a log method
+        """
+        parent = method_node.parent
+        if not parent or parent.type != "selector_expression":
+            return False
+
+        operand = parent.child_by_field_name("operand")
+        if operand and operand.type == "identifier":
+            pkg_name = operand.text.decode("utf-8")
+            if pkg_name in _NON_LOG_PACKAGES:
                 return True
 
         return False
@@ -537,10 +580,16 @@ class GoScanner:
     # ── Module path ───────────────────────────────────────────────────────────
 
     def _get_module_path(self, file_path: Path) -> str:
-        """Infer a module path from the Go file path."""
-        parts = list(file_path.with_suffix("").parts)
-        for marker in ("cmd", "internal", "pkg", "api", "server"):
-            if marker in parts:
-                idx = parts.index(marker)
-                return "/".join(parts[idx:])
-        return "/".join(parts[-3:])
+        """Derive a module path from the Go file path.
+
+        Uses the full file path (relative to CWD) minus the extension.
+        This ensures a 1:1 mapping between the ``file`` field and the
+        ``module`` field, avoiding inconsistencies from marker-based
+        heuristics (e.g. 'server.go' colliding with the 'server' marker).
+
+        Examples:
+            src/gateway/server.go       → src/gateway/server
+            cmd/flume/commands/start.go  → cmd/flume/commands/start
+            internal/auth/middleware.go  → internal/auth/middleware
+        """
+        return str(file_path.with_suffix(""))

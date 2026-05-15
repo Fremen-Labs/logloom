@@ -108,7 +108,7 @@ class GraphBuilder:
         if "go" in languages:
             try:
                 from ..scanner.go_scanner import GoScanner
-                go_scanner = GoScanner()
+                go_scanner = GoScanner(exclude_tests=True)
                 if go_scanner.available:
                     for f in all_files:
                         if f.suffix in _GO_EXTS:
