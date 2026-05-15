@@ -152,7 +152,9 @@ Run `logloom --help` to explore!
 
 ## Next Level Stuff
 
-See [Architecture Guide](docs/architecture.md) for the full technical deep dive and [roadmap](https://github.com/Fremen-Labs/logloom/issues) for what’s coming next.
+- [Architecture Guide](docs/architecture.md): The full technical deep dive
+- [Elastic Integrations](docs/how-to/elastic-integrations.md): How to use LogLoom with Filebeat, Elastic Agent, Logstash, and OpenTelemetry
+- [Roadmap](https://github.com/Fremen-Labs/logloom/issues): See what’s coming next
 
 ---
 

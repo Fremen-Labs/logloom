@@ -10,6 +10,7 @@ Welcome to the LogLoom documentation. We follow the [Diátaxis framework](https:
 *Problem-oriented guides for achieving specific goals.*
 - [How to Redact Sensitive Data](how-to/redact-sensitive-data.md): Prevent PII, passwords, and sensitive keys from ever hitting your knowledge graph.
 - [How to Deploy in Production](how-to/deploy-in-production.md): Managing your `logloom-graph.json` via environment variables and Docker containers.
+- [How to Integrate with Elastic Beats & OTEL](how-to/elastic-integrations.md): Learn how LogLoom integrates seamlessly with every Elastic data collection path.
 
 ## 📖 Reference
 *Information-oriented material for quick lookup.*
