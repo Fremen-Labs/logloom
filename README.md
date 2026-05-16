@@ -119,7 +119,7 @@ pip install "logloom[elasticsearch,otel]"
 
 We just dialed into the mainframe and dropped the Ecosystem update:
 
-- **Production Go & TS Scanners**: Handles complex method chains, anonymous closures, try/catch blocks, and asynchronous flow control. 
+- **Production Go & TS Scanners**: Hardened like a Nokia 3310. The Go scanner now boasts **87%+ call-graph edge coverage**, dominating complex method chains, Cobra `RunE` struct closures, variable-assigned closures, IIFEs, and `defer` cleanup routines. The TS/JS scanner handles `try/catch` blocks and asynchronous flow control like a pro.
 - **`logloom es map`**: Generates massive, beautiful Elasticsearch index templates with our `logloom.*` ECS namespace.
 - **`logloom es export`**: NDJSON shipper that blasts your graph into an Elasticsearch enrichment index.
 - **OTEL Log Processor**: `LogLoomProcessor` intercepts standard OpenTelemetry LogRecords and injects semantic tags and graph provenance before export.
