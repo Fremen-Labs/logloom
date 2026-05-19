@@ -65,6 +65,14 @@ LOGLOOM_FIELD_MAPPING: Dict[str, Any] = {
             "call_children": {
                 "type": "keyword",
             },
+            # Phase A: Human-readable function names for call targets.
+            # Enables Kibana queries like: logloom.call_parent_names: "run_worker"
+            "call_parent_names": {
+                "type": "keyword",
+            },
+            "call_child_names": {
+                "type": "keyword",
+            },
             "graph_version": {
                 "type": "keyword",
             },
@@ -174,6 +182,8 @@ def generate_enrichment_documents(
                 "message_template": node.message_template,
                 "call_parents": node.call_parents,
                 "call_children": node.call_children,
+                "call_parent_names": node.call_parent_names,
+                "call_child_names": node.call_child_names,
                 "graph_version": graph.built_at,
                 "commit_sha": graph.commit_sha,
                 "branch": graph.branch,
@@ -221,6 +231,8 @@ def generate_enrich_policy(
                 "logloom.message_template",
                 "logloom.call_parents",
                 "logloom.call_children",
+                "logloom.call_parent_names",
+                "logloom.call_child_names",
                 "logloom.graph_version",
                 "logloom.commit_sha",
                 "logloom.branch",

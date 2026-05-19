@@ -15,10 +15,15 @@ class GraphNode(BaseModel):
     lexical_parents: List[str] = Field(default_factory=list)
     call_parents: List[str] = Field(default_factory=list)
     call_children: List[str] = Field(default_factory=list)
+    # Phase A: Resolved call target names (human-readable, not opaque IDs).
+    # call_parents/call_children contain node IDs (ll:abc123) for graph traversal.
+    # call_parent_names/call_child_names contain function names for human consumption.
+    call_parent_names: List[str] = Field(default_factory=list)
+    call_child_names: List[str] = Field(default_factory=list)
 
 class LogLoomGraph(BaseModel):
     """The full knowledge graph artifact."""
-    schema_version: str = "1"
+    schema_version: str = "1.1"
     project: str
     built_at: str
     commit_sha: Optional[str] = None

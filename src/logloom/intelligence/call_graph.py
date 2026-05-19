@@ -150,27 +150,41 @@ class CallGraphResolver:
             return result
 
         # Step 3: For each node, populate call_parents and call_children
+        # Phase A: Also track the human-readable function names alongside
+        # the opaque node IDs. The names enable direct Kibana queries like
+        # `logloom.call_parent_names: "run_worker"` without a second lookup.
         new_nodes: Dict[str, GraphNode] = {}
         for node_id, node in graph.nodes.items():
             parents: Set[str] = set()
+            parent_names: Set[str] = set()
             children: Set[str] = set()
+            child_names: Set[str] = set()
 
             # Find parent functions (functions that call this node's function)
             for caller, callees in call_map.items():
                 for callee in callees:
                     if _func_matches_callee(node.function, callee) and caller != node.function:
-                        for parent_node_id in _resolve_func_nodes(caller):
+                        parent_node_ids = _resolve_func_nodes(caller)
+                        for parent_node_id in parent_node_ids:
                             parents.add(parent_node_id)
+                        # Track the caller name even if it has no log nodes
+                        # (this surfaces uninstrumented callers in the graph)
+                        parent_names.add(caller)
 
             # Find child functions (functions called by this node's function)
             for callee in _get_caller_callees(node.function):
                 if callee != node.function:
-                    for child_node_id in _resolve_func_nodes(callee):
+                    child_node_ids = _resolve_func_nodes(callee)
+                    for child_node_id in child_node_ids:
                         children.add(child_node_id)
+                    # Track the callee name even if it has no log nodes
+                    child_names.add(callee)
 
             new_nodes[node_id] = node.model_copy(update={
                 "call_parents": sorted(parents),
                 "call_children": sorted(children),
+                "call_parent_names": sorted(parent_names),
+                "call_child_names": sorted(child_names),
             })
 
         return graph.model_copy(update={"nodes": new_nodes})

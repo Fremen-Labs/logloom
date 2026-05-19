@@ -34,7 +34,7 @@ def test_otel_resource_attributes():
     attrs = get_otel_resource_attributes(graph)
 
     assert attrs["logloom.project"] == "test-otel"
-    assert attrs["logloom.schema_version"] == "1"
+    assert attrs["logloom.schema_version"] == "1.1"
     assert attrs["logloom.node_count"] == 1
     assert attrs["logloom.commit_sha"] == "def456"
     assert attrs["logloom.branch"] == "main"

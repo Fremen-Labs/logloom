@@ -227,7 +227,7 @@ class TestOTELBridgeEndToEnd:
         attrs = get_otel_resource_attributes(rich_graph)
 
         assert attrs["logloom.project"] == "test-ecosystem"
-        assert attrs["logloom.schema_version"] == "1"
+        assert attrs["logloom.schema_version"] == "1.1"
         assert attrs["logloom.node_count"] == 4
         assert attrs["logloom.commit_sha"] == "abc123def456"
         assert attrs["logloom.branch"] == "main"
