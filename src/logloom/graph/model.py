@@ -51,6 +51,22 @@ class CoverageMetrics(BaseModel):
     uninstrumented: List[str] = Field(default_factory=list)
 
 
+class ModelField(BaseModel):
+    """Represents a field in a model definition."""
+    name: str
+    type_hint: Optional[str] = None
+    default: Optional[str] = None
+
+
+class ModelDefinition(BaseModel):
+    """Represents a scanned data model (e.g. class, struct, interface)."""
+    name: str
+    file: str
+    line: int
+    base_classes: List[str] = Field(default_factory=list)
+    fields: List[ModelField] = Field(default_factory=list)
+
+
 class LogLoomGraph(BaseModel):
     """The full knowledge graph artifact."""
     schema_version: str = "1.2"
@@ -61,6 +77,7 @@ class LogLoomGraph(BaseModel):
     nodes: Dict[str, GraphNode]
     redacted_patterns: List[str] = Field(default_factory=list)
     coverage: Optional[CoverageMetrics] = None
+    models: Dict[str, ModelDefinition] = Field(default_factory=dict)
 
     def save(self, path: str):
         with open(path, "w") as f:

@@ -67,6 +67,7 @@ class GraphBuilder:
         enable_call_graph: bool = True,
         enable_git: bool = True,
         enable_coverage: bool = True,
+        enable_models: bool = True,
         languages: Optional[List[str]] = None,
     ) -> LogLoomGraph:
         """Build the LogLoom knowledge graph from source files.
@@ -225,6 +226,13 @@ class GraphBuilder:
             try:
                 from ..intelligence.coverage import compute_coverage
                 graph.coverage = compute_coverage(graph, source_paths, languages)
+            except Exception:
+                pass
+
+        if enable_models:
+            try:
+                from ..scanner.model_scanner import scan_models
+                graph.models = scan_models(source_paths, languages)
             except Exception:
                 pass
 

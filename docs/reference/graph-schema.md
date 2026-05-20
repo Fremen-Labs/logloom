@@ -14,6 +14,7 @@ The knowledge graph produced by `logloom build` adheres to a strict JSON schema 
 | `redacted_patterns` | Array of Strings | List of redaction patterns applied during the build. |
 | `nodes` | Object | A map where the keys are the `ll:` node IDs and the values are `GraphNode` objects. |
 | `coverage` | Object (Optional) | Scan completeness and logging coverage metrics. Adheres to the [CoverageMetrics](#coveragemetrics-object) schema. |
+| `models` | Object | A map from model name to [ModelDefinition](#modeldefinition-object) objects. |
 
 ## GraphNode Object
 
@@ -59,3 +60,21 @@ The knowledge graph produced by `logloom build` adheres to a strict JSON schema 
 | `instrumented_functions` | Integer | Number of defined functions containing at least one log call. |
 | `coverage_pct` | Float | Percentage of functions that are instrumented (range: `0.0` - `100.0`). |
 | `uninstrumented` | Array of Strings | Qualified names of defined functions that do not contain any log call sites (format: `module:function`). |
+
+## ModelDefinition Object
+
+| Field | Type | Description |
+| :--- | :--- | :--- |
+| `name` | String | The name of the data model class, Go struct, or TypeScript interface/type. |
+| `file` | String | The file path containing the data model definition. |
+| `line` | Integer | The 1-indexed line number where the model is defined. |
+| `base_classes` | Array of Strings | List of base classes or extended interfaces (e.g. `["BaseModel"]`, `["BaseTask"]`). |
+| `fields` | Array of Objects | List of fields defining the model. Each object adheres to the [ModelField](#modelfield-object) schema. |
+
+## ModelField Object
+
+| Field | Type | Description |
+| :--- | :--- | :--- |
+| `name` | String | The field/property identifier name. |
+| `type_hint` | String (Optional) | The type hint or annotation for the field. |
+| `default` | String (Optional) | The default value or Go tag associated with the field. |
