@@ -126,7 +126,9 @@ def ship_to_elasticsearch(
         )
 
     # Build client
-    client_kwargs: Dict[str, Any] = {"hosts": [es_url], "verify_certs": verify_certs}
+    client_kwargs: Dict[str, Any] = {"hosts": [es_url]}
+    if es_url.startswith("https://"):
+        client_kwargs["verify_certs"] = verify_certs
     if api_key:
         client_kwargs["api_key"] = api_key
     elif username and password:

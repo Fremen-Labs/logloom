@@ -245,11 +245,22 @@ class GraphBuilder:
 
         # ── Collect files ─────────────────────────────────────────────────
         all_files = []
+        ignored_names = {"node_modules", "venv", "__pycache__"}
         for path in source_paths:
             if path.is_file():
-                all_files.append(path)
+                parts = path.parent.parts
+                if not any(part.startswith(".") or part in ignored_names for part in parts):
+                    all_files.append(path)
             elif path.is_dir():
-                all_files.extend(path.rglob("*"))
+                for p in path.rglob("*"):
+                    if p.is_file():
+                        try:
+                            rel = p.relative_to(path)
+                            if any(part.startswith(".") or part in ignored_names for part in rel.parts):
+                                continue
+                        except Exception:
+                            pass
+                        all_files.append(p)
 
         # Filter active files based on languages
         active_files = []

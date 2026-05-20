@@ -88,8 +88,16 @@ class CallGraphResolver:
             if path.is_file():
                 self._scan_file(path, call_map)
             elif path.is_dir():
+                _ignored = {"node_modules", "venv", "__pycache__"}
                 for src_file in path.rglob("*"):
-                    self._scan_file(src_file, call_map)
+                    if src_file.is_file():
+                        try:
+                            rel = src_file.relative_to(path)
+                            if any(part.startswith(".") or part in _ignored for part in rel.parts):
+                                continue
+                        except Exception:
+                            pass
+                        self._scan_file(src_file, call_map)
 
         # Step 2: Identify which functions contain log sites (by qualified function name)
         # Maps qualified function name -> List[node_id]

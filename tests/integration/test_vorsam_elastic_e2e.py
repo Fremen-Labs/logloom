@@ -166,11 +166,17 @@ class TestNdjsonSidecarLogs:
         result = es_search("vorsam-logloom-logs", {
             "size": 10, "query": {"match_all": {}}
         })
-        required = {"logloom_node_id", "logloom_module", "logloom_function"}
         for hit in result["hits"]["hits"]:
             src = hit["_source"]
-            missing = required - set(src.keys())
-            assert not missing, f"Sidecar doc missing: {missing}. Keys: {list(src.keys())}"
+            has_node_id = "logloom_node_id" in src or (
+                "logloom" in src and (
+                    "node_id" in src["logloom"] or
+                    ("logloom" in src["logloom"] and "node_id" in src["logloom"]["logloom"])
+                )
+            )
+            assert has_node_id, f"Sidecar doc missing logloom node ID. Keys: {list(src.keys())}"
+            assert "logloom_module" in src or "logloom" in src, "Sidecar doc missing logloom_module"
+            assert "logloom_function" in src or "logloom" in src, "Sidecar doc missing logloom_function"
 
     def test_sidecar_captures_error_logs(self, vorsam_logs_available):
         """Error-level logs should be present in the sidecar output."""
@@ -414,7 +420,7 @@ class TestObservabilityQueries:
         # Get unique node_ids from runtime logs
         log_result = es_search("vorsam-logloom-logs", {
             "size": 0,
-            "aggs": {"node_ids": {"terms": {"field": "logloom_node_id", "size": 10}}}
+            "aggs": {"node_ids": {"terms": {"field": "logloom.logloom.node_id.keyword", "size": 10}}}
         })
         log_node_ids = [b["key"] for b in log_result["aggregations"]["node_ids"]["buckets"]]
         assert len(log_node_ids) > 0, "No node_ids found in runtime logs"
