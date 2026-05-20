@@ -71,25 +71,36 @@ def test_compute_imports_e2e(tmp_path):
     # Setup subdirectories to simulate projects
     py_dir = tmp_path / "src" / "py"
     py_dir.mkdir(parents=True)
-    py_code = "import json"
+    py_code = "import json\nfrom .models import local_mod"
     (py_dir / "app.py").write_text(py_code, encoding="utf-8")
+    (py_dir / "models.py").write_text("", encoding="utf-8")
 
     go_dir = tmp_path / "go"
     go_dir.mkdir()
     go_code = 'package main\nimport "strings"'
     (go_dir / "main.go").write_text(go_code, encoding="utf-8")
 
-    imports_graph = compute_imports([tmp_path], ["python", "go"])
+    # With external imports included
+    imports_graph_all = compute_imports([tmp_path], ["python", "go"], include_external=True)
     
-    # Python module name check:
-    # Parts of tmp_path/src/py/app.py: .../src/py/app
-    # Index of "src" is found, so it should map to "py.app"
-    assert "py.app" in imports_graph
-    assert imports_graph["py.app"] == ["json"]
+    assert "py.app" in imports_graph_all
+    assert "json" in imports_graph_all["py.app"]
+    assert ".models" in imports_graph_all["py.app"]
 
     # Go module name should map to the relative path/file path without extension
-    go_key = str((go_dir / "main").relative_to(tmp_path.parent))
-    # Or check if there's any key ending in "/go/main" or "go/main"
-    matched_key = next((k for k in imports_graph if k.endswith("go/main")), None)
-    assert matched_key is not None
-    assert imports_graph[matched_key] == ["strings"]
+    matched_key_all = next((k for k in imports_graph_all if k.endswith("go/main")), None)
+    assert matched_key_all is not None
+    assert imports_graph_all[matched_key_all] == ["strings"]
+
+    # With default (only internal imports)
+    imports_graph_internal = compute_imports([tmp_path], ["python", "go"])
+    
+    assert "py.app" in imports_graph_internal
+    # json is filtered out, but local_mod should resolve to py.models and be kept
+    assert "json" not in imports_graph_internal["py.app"]
+    assert "py.models" in imports_graph_internal["py.app"]
+
+    matched_key_internal = next((k for k in imports_graph_internal if k.endswith("go/main")), None)
+    assert matched_key_internal is not None
+    # strings is external stdlib, so it should be filtered out
+    assert imports_graph_internal[matched_key_internal] == []

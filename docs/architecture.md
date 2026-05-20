@@ -70,3 +70,16 @@ Milestone 3 jacked the LogLoom core directly into the global observability backb
   - `ts_scanner.py`: Hardened TypeScript/JS parser. Understands `try/catch` contexts, async closures, class methods, and template literals.
 - **GitHub Actions Integration**:
   - Ready to drop into your pipeline like a dial-up modem auto-dialing the BBS. `uses: fremenlabs/logloom@v0.3.0` builds the graph and tests it continuously.
+
+## Milestone 4 Deep Static Context and CI Quality Gates
+
+Milestone 4 introduces deep static typing context, coverage metrics, and strict quality gate enforcement for CI pipelines:
+
+- **Resolved Call Targets & Name Collision Mitigation**: Qualifies call targets and data model dictionaries (`module.function` and `module.model`) to prevent name collisions in larger codebases.
+- **Function Signatures**: Extracts parameter names, type hints, defaults, decorators, and return types from enclosing functions.
+- **Data Model Extraction**: Parses classes, interfaces, and struct definitions to capture attributes, type definitions, defaults, and inheritance hierarchies.
+- **Import Graph & Filtering**: Maps internal module dependencies while filtering out external or stdlib modules by default to keep the dependency graph clean.
+- **Log Coverage & CI Gates**:
+  - Computes exact log coverage (percentage of functions with log sites).
+  - Prints uninstrumented functions in `logloom graph stats` to identify gaps.
+  - Integrates `--min-coverage <pct>` to automatically fail the build/CI pipeline when log coverage is below the threshold.

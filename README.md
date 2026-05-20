@@ -145,6 +145,14 @@ pip install "logloom[build]"
 pip install "logloom[elasticsearch,otel]"
 ```
 
+## Milestone 4: Deep Context & Quality Gates (v0.4.0)
+
+- **Function Signatures**: Complete parsing of parameter names, type hints, defaults, and return type definitions of enclosing functions.
+- **Data Model Extraction**: Extracts structured attributes, type definitions, defaults, and inheritance hierarchies for classes, structs, and interfaces (Python, Go, TypeScript).
+- **Import Dependency Graph**: Scans module-to-module dependencies across Python, Go, and TypeScript with relative resolution and noise-filtering (only internal imports by default, customizable via `--external-imports`).
+- **Quality Gates & CI Enforcements**: Fail CI/CD builds if log coverage falls below threshold using the `--min-coverage <percentage>` CLI option.
+- **Log Coverage Metrics & Stats**: Added coverage percentage, instrumented functions count, and uninstrumented function lists to `logloom graph stats` output.
+
 ## Milestone 3: Ecosystem (v0.3.0)
 
 We just dialed into the mainframe and dropped the Ecosystem update:

@@ -19,7 +19,7 @@ _GO_EXTS = {".go"}
 _TS_EXTS = {".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs"}
 
 
-def compute_imports(source_paths: List[Path], languages: List[str]) -> Dict[str, List[str]]:
+def compute_imports(source_paths: List[Path], languages: List[str], include_external: bool = False) -> Dict[str, List[str]]:
     """Compute module-to-imports mapping for all scanned files."""
     if Parser is None:
         return {}
@@ -58,7 +58,58 @@ def compute_imports(source_paths: List[Path], languages: List[str]) -> Dict[str,
             except Exception as e:
                 logger.debug(f"Failed to extract TypeScript imports from {f}: {e}")
 
+    if not include_external:
+        imports_graph = _filter_internal_imports(imports_graph)
+
     return imports_graph
+
+
+def _filter_internal_imports(imports_graph: Dict[str, List[str]]) -> Dict[str, List[str]]:
+    """Filter imports to only include modules that are internal to the scanned project."""
+    internal_mods = set(imports_graph.keys())
+    filtered_graph = {}
+
+    for mod, imps in imports_graph.items():
+        filtered_imps = []
+        for imp in imps:
+            # 1. Resolve relative import
+            resolved_imp = imp
+            if imp.startswith("."):
+                dots = 0
+                while dots < len(imp) and imp[dots] == ".":
+                    dots += 1
+                parent_parts = mod.split(".")
+                if len(parent_parts) >= dots:
+                    resolved_imp = ".".join(parent_parts[:-dots])
+                    if imp[dots:]:
+                        resolved_imp = f"{resolved_imp}.{imp[dots:]}"
+                else:
+                    resolved_imp = imp.lstrip(".")
+
+            # 2. Check if the resolved import is one of our internal modules
+            is_internal = False
+            if resolved_imp in internal_mods:
+                is_internal = True
+            else:
+                for internal_mod in internal_mods:
+                    # Match end of path/module suffix (e.g., pkg/auth vs github.com/user/repo/pkg/auth)
+                    if (
+                        resolved_imp == internal_mod or
+                        internal_mod.endswith("/" + resolved_imp) or
+                        internal_mod.endswith("." + resolved_imp) or
+                        resolved_imp.endswith("/" + internal_mod) or
+                        resolved_imp.endswith("." + internal_mod)
+                    ):
+                        resolved_imp = internal_mod
+                        is_internal = True
+                        break
+
+            if is_internal and resolved_imp != mod:
+                filtered_imps.append(resolved_imp)
+
+        filtered_graph[mod] = sorted(list(set(filtered_imps)))
+
+    return filtered_graph
 
 
 def _get_py_module_path(file_path: Path) -> str:
