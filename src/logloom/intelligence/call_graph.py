@@ -170,6 +170,32 @@ class CallGraphResolver:
             elif len(global_candidates) > 1:
                 # Multiple candidates found in different modules: avoid linking to prevent noise
                 return []
+
+            # 4. Cross-language / Polyglot heuristic matching
+            norm_callee = callee.replace("_", "").replace("-", "").lower()
+            if "." in norm_callee:
+                norm_callee = norm_callee.rsplit(".", 1)[1]
+
+            # Find the file extension of the caller
+            caller_file = next((n.file for n in graph.nodes.values() if f"{n.module}.{n.function}" == caller_qname or n.function == caller_qname), "")
+            caller_ext = Path(caller_file).suffix if caller_file else ""
+
+            cross_candidates = []
+            for q in qualified_func_to_nodes:
+                cand_nodes = [graph.nodes[nid] for nid in qualified_func_to_nodes[q] if nid in graph.nodes]
+                if not cand_nodes:
+                    continue
+                cand_ext = Path(cand_nodes[0].file).suffix
+
+                if cand_ext != caller_ext:
+                    func_part = q.split(".")[-1]
+                    norm_func = func_part.replace("_", "").replace("-", "").lower()
+                    if norm_callee == norm_func:
+                        cross_candidates.append(q)
+
+            if cross_candidates:
+                return cross_candidates
+
             return []
 
         # Step 3: For each node, populate call_parents and call_children

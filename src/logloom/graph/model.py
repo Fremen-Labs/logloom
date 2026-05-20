@@ -57,6 +57,10 @@ class ModelField(BaseModel):
     type_hint: Optional[str] = None
     default: Optional[str] = None
 
+    @property
+    def is_required(self) -> bool:
+        return self.default is None
+
 
 class ModelDefinition(BaseModel):
     """Represents a scanned data model (e.g. class, struct, interface)."""

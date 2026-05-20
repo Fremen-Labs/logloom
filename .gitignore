@@ -21,3 +21,4 @@ venv/
 
 # LogLoom artifacts
 logloom-graph.json
+.logloom-cache.json

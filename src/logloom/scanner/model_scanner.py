@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
-from typing import Dict, List
+from typing import Dict, List, Optional
 from ..graph.model import ModelDefinition, ModelField
 
 try:
@@ -45,8 +45,15 @@ def _get_module_path(file_path: Path) -> str:
         return "/".join(parts[-3:])
 
 
-def scan_models(source_paths: List[Path], languages: List[str]) -> Dict[str, ModelDefinition]:
+def scan_models(
+    source_paths: List[Path],
+    languages: List[str],
+    pre_extracted_models: Optional[Dict[str, ModelDefinition]] = None,
+) -> Dict[str, ModelDefinition]:
     """Scan all source files for data model definitions."""
+    if pre_extracted_models is not None:
+        return pre_extracted_models
+
     if Parser is None:
         return {}
 

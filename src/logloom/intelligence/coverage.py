@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
-from typing import List, Set
+from typing import List, Set, Optional
 from ..graph.model import LogLoomGraph, CoverageMetrics
 
 try:
@@ -31,47 +31,49 @@ def compute_coverage(
     graph: LogLoomGraph,
     source_paths: List[Path],
     languages: List[str],
+    defined_functions: Optional[Set[str]] = None,
 ) -> CoverageMetrics:
     """Scan all source files to count all functions and compute coverage."""
-    if Parser is None:
-        return CoverageMetrics(
-            total_functions=0,
-            instrumented_functions=0,
-            coverage_pct=0.0,
-            uninstrumented=[],
-        )
+    if defined_functions is None:
+        if Parser is None:
+            return CoverageMetrics(
+                total_functions=0,
+                instrumented_functions=0,
+                coverage_pct=0.0,
+                uninstrumented=[],
+            )
 
-    all_files: List[Path] = []
-    for path in source_paths:
-        if path.is_file():
-            all_files.append(path)
-        elif path.is_dir():
-            all_files.extend(path.rglob("*"))
+        all_files: List[Path] = []
+        for path in source_paths:
+            if path.is_file():
+                all_files.append(path)
+            elif path.is_dir():
+                all_files.extend(path.rglob("*"))
 
-    defined_functions: Set[str] = set()
+        defined_functions = set()
 
-    for f in all_files:
-        suffix = f.suffix
-        if suffix in _PYTHON_EXTS and "python" in languages:
-            try:
-                defined_functions.update(_extract_python_functions(f))
-            except Exception as e:
-                logger.debug(f"Failed to extract Python functions from {f}: {e}")
+        for f in all_files:
+            suffix = f.suffix
+            if suffix in _PYTHON_EXTS and "python" in languages:
+                try:
+                    defined_functions.update(_extract_python_functions(f))
+                except Exception as e:
+                    logger.debug(f"Failed to extract Python functions from {f}: {e}")
 
-        elif suffix in _GO_EXTS and "go" in languages:
-            # Skip test files as scanners exclude them
-            if f.name.endswith("_test.go"):
-                continue
-            try:
-                defined_functions.update(_extract_go_functions(f))
-            except Exception as e:
-                logger.debug(f"Failed to extract Go functions from {f}: {e}")
+            elif suffix in _GO_EXTS and "go" in languages:
+                # Skip test files as scanners exclude them
+                if f.name.endswith("_test.go"):
+                    continue
+                try:
+                    defined_functions.update(_extract_go_functions(f))
+                except Exception as e:
+                    logger.debug(f"Failed to extract Go functions from {f}: {e}")
 
-        elif suffix in _TS_EXTS and "typescript" in languages:
-            try:
-                defined_functions.update(_extract_ts_functions(f))
-            except Exception as e:
-                logger.debug(f"Failed to extract TypeScript functions from {f}: {e}")
+            elif suffix in _TS_EXTS and "typescript" in languages:
+                try:
+                    defined_functions.update(_extract_ts_functions(f))
+                except Exception as e:
+                    logger.debug(f"Failed to extract TypeScript functions from {f}: {e}")
 
     # Build set of instrumented functions in the graph as f"{module}:{function}"
     instrumented_functions: Set[str] = set()
