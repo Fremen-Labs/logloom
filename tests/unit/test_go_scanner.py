@@ -296,3 +296,28 @@ func fmtCases() {
     assert "processed {} records in {}" in msgs
     assert "connection to {} failed" in msgs
 
+
+def test_go_scanner_function_signatures(go_scanner, tmp_path: Path):
+    """Go scanner should extract function signatures including return types and parameters."""
+    f = tmp_path / "signature.go"
+    f.write_text('''
+package main
+import "log"
+func processOrder(orderID string, amount float64) (bool, error) {
+    log.Println("Processing order")
+    return true, nil
+}
+''')
+    sites = go_scanner.scan_file(f)
+    assert len(sites) == 1
+    site = sites[0]
+    assert site.signature is not None
+    assert site.signature["is_async"] is False
+    assert site.signature["return_type"] == "(bool, error)"
+    assert len(site.signature["parameters"]) == 2
+    assert site.signature["parameters"][0]["name"] == "orderID"
+    assert site.signature["parameters"][0]["type_hint"] == "string"
+    assert site.signature["parameters"][1]["name"] == "amount"
+    assert site.signature["parameters"][1]["type_hint"] == "float64"
+
+

@@ -11,7 +11,7 @@ Two output modes:
 from __future__ import annotations
 
 import json
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 from ..graph.model import LogLoomGraph
 
@@ -65,6 +65,30 @@ LOGLOOM_FIELD_MAPPING: Dict[str, Any] = {
             "call_children": {
                 "type": "keyword",
             },
+            # Phase A: Human-readable function names for call targets.
+            # Enables Kibana queries like: logloom.call_parent_names: "run_worker"
+            "call_parent_names": {
+                "type": "keyword",
+            },
+            "call_child_names": {
+                "type": "keyword",
+            },
+            # Phase B: Function signature of the enclosing function.
+            "signature": {
+                "properties": {
+                    "parameters": {
+                        "type": "nested",
+                        "properties": {
+                            "name": {"type": "keyword"},
+                            "type_hint": {"type": "keyword"},
+                            "default": {"type": "keyword"},
+                        },
+                    },
+                    "return_type": {"type": "keyword"},
+                    "is_async": {"type": "boolean"},
+                    "decorators": {"type": "keyword"},
+                },
+            },
             "graph_version": {
                 "type": "keyword",
             },
@@ -105,7 +129,7 @@ def generate_component_template(
 
 def generate_index_template(
     template_name: str = "logloom-logs",
-    index_patterns: list[str] | None = None,
+    index_patterns: Optional[List[str]] = None,
     priority: int = 200,
     number_of_shards: int = 1,
     number_of_replicas: int = 1,
@@ -161,7 +185,7 @@ def generate_enrichment_documents(
     """
     docs = []
     for node in graph.nodes.values():
-        docs.append({
+        doc = {
             "_id": node.node_id,
             "logloom": {
                 "node_id": node.node_id,
@@ -174,11 +198,17 @@ def generate_enrichment_documents(
                 "message_template": node.message_template,
                 "call_parents": node.call_parents,
                 "call_children": node.call_children,
+                "call_parent_names": node.call_parent_names,
+                "call_child_names": node.call_child_names,
                 "graph_version": graph.built_at,
                 "commit_sha": graph.commit_sha,
                 "branch": graph.branch,
             },
-        })
+        }
+        # Phase B: Include function signature if present
+        if node.signature:
+            doc["logloom"]["signature"] = node.signature.model_dump()
+        docs.append(doc)
     return docs
 
 
@@ -221,6 +251,9 @@ def generate_enrich_policy(
                 "logloom.message_template",
                 "logloom.call_parents",
                 "logloom.call_children",
+                "logloom.call_parent_names",
+                "logloom.call_child_names",
+                "logloom.signature",
                 "logloom.graph_version",
                 "logloom.commit_sha",
                 "logloom.branch",

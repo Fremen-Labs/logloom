@@ -56,18 +56,36 @@ That’s it. Your logs now carry the DNA of the code that wrote them.
 ## What Actually Happens Under the Hood
 
 ### Build Time (`logloom build`)
-Creates `logloom-graph.json` — your app’s **living source map**:
+Creates `logloom-graph.json` — your app’s **living source map** (Schema Version `1.2`):
 
 ```json
 {
+  "schema_version": "1.2",
+  "project": "my-auth-service",
   "nodes": {
     "ll:abc123def456": {
+      "node_id": "ll:abc123def456",
       "file": "src/auth/service.py",
       "module": "app.auth.service",
       "function": "authenticate",
+      "level": "error",
       "message_template": "User login failed",
+      "line": 42,
+      "semantic_tags": ["auth", "security"],
       "lexical_parents": ["try:refresh_token", "AuthService"],
-      "semantic_tags": ["auth", "security"]
+      "call_parents": ["ll:d1e2f3g4"],
+      "call_children": ["ll:h5i6j7k8"],
+      "call_parent_names": ["refresh_session"],
+      "call_child_names": ["verify_credentials"],
+      "signature": {
+        "parameters": [
+          {"name": "username", "type_hint": "str", "default": null},
+          {"name": "password", "type_hint": "str", "default": null}
+        ],
+        "return_type": "bool",
+        "is_async": true,
+        "decorators": ["rate_limited"]
+      }
     }
   }
 }
@@ -83,12 +101,24 @@ Creates `logloom-graph.json` — your app’s **living source map**:
   "ll_node": "ll:abc123def456",
   "ll_module": "app.auth.service",
   "ll_function": "authenticate",
-  "ll_tags": ["auth", "security"]
+  "ll_tags": ["auth", "security"],
+  "ll_call_parent_names": ["refresh_session"],
+  "ll_call_child_names": ["verify_credentials"],
+  "ll_signature": {
+    "parameters": [
+      {"name": "username", "type_hint": "str"},
+      {"name": "password", "type_hint": "str"}
+    ],
+    "return_type": "bool",
+    "is_async": true,
+    "decorators": ["rate_limited"]
+  }
 }
 ```
 
 Now your Elastic queries and AI agents can say things like:  
 *"Show me every failure in the auth retry path in the last hour"*  
+or *"Find all error logs inside async functions that accept a username"*  
 and actually get meaningful answers.
 
 ## Core Features

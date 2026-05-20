@@ -2,7 +2,7 @@ import re
 from pathlib import Path
 from typing import List, Optional
 from datetime import datetime, timezone
-from .model import LogLoomGraph, GraphNode
+from .model import LogLoomGraph, GraphNode, FunctionSignature, Parameter
 from .hasher import NodeHasher
 from ..scanner.python_scanner import PythonScanner
 from ..scanner.regex_fallback import regex_fallback_scan
@@ -66,6 +66,9 @@ class GraphBuilder:
         enable_tags: bool = True,
         enable_call_graph: bool = True,
         enable_git: bool = True,
+        enable_coverage: bool = True,
+        enable_models: bool = True,
+        enable_imports: bool = True,
         languages: Optional[List[str]] = None,
     ) -> LogLoomGraph:
         """Build the LogLoom knowledge graph from source files.
@@ -164,6 +167,18 @@ class GraphBuilder:
                         msg_template = "[REDACTED]"
                         break
 
+            # Phase B: Build FunctionSignature from scanner data
+            sig = None
+            if site.signature:
+                sig = FunctionSignature(
+                    parameters=[
+                        Parameter(**p) for p in site.signature.get("parameters", [])
+                    ],
+                    return_type=site.signature.get("return_type"),
+                    is_async=site.signature.get("is_async", False),
+                    decorators=site.signature.get("decorators", []),
+                )
+
             nodes[node_id] = GraphNode(
                 node_id=node_id,
                 file=site.file_path,
@@ -173,11 +188,12 @@ class GraphBuilder:
                 message_template=msg_template,
                 line=site.line,
                 semantic_tags=semantic_tags,
-                lexical_parents=[parent_scope] if parent_scope else []
+                lexical_parents=[parent_scope] if parent_scope else [],
+                signature=sig,
             )
 
         graph = LogLoomGraph(
-            schema_version="1",
+            schema_version="1.2",
             project=project_name,
             built_at=datetime.now(timezone.utc).isoformat(),
             nodes=nodes,
@@ -205,6 +221,27 @@ class GraphBuilder:
                 from ..intelligence.git_meta import enrich_graph_with_git
                 graph = enrich_graph_with_git(graph)
             except ImportError:
+                pass
+
+        if enable_coverage:
+            try:
+                from ..intelligence.coverage import compute_coverage
+                graph.coverage = compute_coverage(graph, source_paths, languages)
+            except Exception:
+                pass
+
+        if enable_models:
+            try:
+                from ..scanner.model_scanner import scan_models
+                graph.models = scan_models(source_paths, languages)
+            except Exception:
+                pass
+
+        if enable_imports:
+            try:
+                from ..intelligence.import_graph import compute_imports
+                graph.imports = compute_imports(source_paths, languages)
+            except Exception:
                 pass
 
         return graph

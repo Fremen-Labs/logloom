@@ -64,7 +64,10 @@ class PythonScanner:
             message = self._extract_string(first_arg_node, source)
             
             # Lexical context traversal
-            enclosing_func, class_name, in_try, in_if, in_loop, decorators = self._get_lexical_context(log_method_node)
+            enclosing_func, class_name, in_try, in_if, in_loop, decorators, func_node = self._get_lexical_context(log_method_node)
+
+            # Phase B: Extract function signature from the enclosing function node
+            sig = self._extract_signature(func_node, decorators) if func_node else None
 
             sites.append(LogCallSite(
                 file_path=str(file_path),
@@ -81,7 +84,8 @@ class PythonScanner:
                     "in_if_block": in_if,
                     "in_loop": in_loop,
                     "decorators": decorators
-                }
+                },
+                signature=sig,
             ))
 
         return sites
@@ -136,6 +140,7 @@ class PythonScanner:
 
     def _get_lexical_context(self, node):
         enclosing_func = None
+        func_node = None  # Phase B: keep reference to the function AST node
         class_name = None
         in_try = False
         in_if = False
@@ -146,6 +151,7 @@ class PythonScanner:
         while parent:
             if parent.type == "function_definition":
                 if not enclosing_func: # Only grab the innermost function
+                    func_node = parent  # Phase B: save the AST node
                     name_node = parent.child_by_field_name("name")
                     if name_node:
                         enclosing_func = name_node.text.decode("utf-8")
@@ -170,7 +176,116 @@ class PythonScanner:
                 
             parent = parent.parent
             
-        return enclosing_func, class_name, in_try, in_if, in_loop, decorators
+        return enclosing_func, class_name, in_try, in_if, in_loop, decorators, func_node
+
+    # ── Phase B: Function signature extraction ────────────────────────────────
+
+    def _extract_signature(self, func_node, decorators: list) -> dict:
+        """Extract function signature from a function_definition AST node.
+
+        Returns a dict matching the FunctionSignature schema:
+          {"parameters": [...], "return_type": str|None,
+           "is_async": bool, "decorators": [...]}
+
+        tree-sitter Python AST for: async def foo(x: int, y: str = 'bar') -> bool:
+          function_definition
+            name: identifier "foo"
+            parameters: parameters
+              identifier "x"         (or typed_parameter for x: int)
+              default_parameter      (for y: str = 'bar')
+            return_type: type         (-> bool)
+        """
+        params = []
+        return_type = None
+        is_async = False
+
+        if not func_node:
+            return {"parameters": params, "return_type": return_type,
+                    "is_async": is_async, "decorators": decorators}
+
+        # Check for async keyword
+        for child in func_node.children:
+            if child.type == "async":
+                is_async = True
+                break
+
+        # Extract parameters
+        params_node = func_node.child_by_field_name("parameters")
+        if params_node:
+            for child in params_node.children:
+                param = self._extract_param(child)
+                if param:
+                    params.append(param)
+
+        # Extract return type annotation
+        ret_node = func_node.child_by_field_name("return_type")
+        if ret_node:
+            return_type = ret_node.text.decode("utf-8").strip()
+
+        return {
+            "parameters": params,
+            "return_type": return_type,
+            "is_async": is_async,
+            "decorators": decorators,
+        }
+
+    def _extract_param(self, node) -> Optional[dict]:
+        """Extract a single parameter from the AST.
+
+        Handles:
+          - identifier: plain param (no type hint)
+          - typed_parameter: param with type annotation (x: int)
+          - default_parameter: param with default (x=5 or x: int = 5)
+          - typed_default_parameter: typed with default
+          - list_splat_pattern / dictionary_splat_pattern: *args, **kwargs
+        """
+        if node.type in ("(", ")", ","):
+            return None
+
+        if node.type == "identifier":
+            name = node.text.decode("utf-8")
+            if name == "self" or name == "cls":
+                return None  # Skip self/cls — not useful for API understanding
+            return {"name": name, "type_hint": None, "default": None}
+
+        if node.type == "typed_parameter":
+            name_node = node.children[0] if node.children else None
+            type_node = node.child_by_field_name("type")
+            name = name_node.text.decode("utf-8") if name_node else "?"
+            if name in ("self", "cls"):
+                return None
+            type_hint = type_node.text.decode("utf-8") if type_node else None
+            return {"name": name, "type_hint": type_hint, "default": None}
+
+        if node.type == "default_parameter":
+            name_node = node.child_by_field_name("name")
+            value_node = node.child_by_field_name("value")
+            name = name_node.text.decode("utf-8") if name_node else "?"
+            if name in ("self", "cls"):
+                return None
+            default = value_node.text.decode("utf-8") if value_node else None
+            return {"name": name, "type_hint": None, "default": default}
+
+        if node.type == "typed_default_parameter":
+            name_node = node.child_by_field_name("name")
+            type_node = node.child_by_field_name("type")
+            value_node = node.child_by_field_name("value")
+            name = name_node.text.decode("utf-8") if name_node else "?"
+            if name in ("self", "cls"):
+                return None
+            type_hint = type_node.text.decode("utf-8") if type_node else None
+            default = value_node.text.decode("utf-8") if value_node else None
+            return {"name": name, "type_hint": type_hint, "default": default}
+
+        if node.type == "list_splat_pattern":
+            name = "*" + (node.children[1].text.decode("utf-8") if len(node.children) > 1 else "args")
+            return {"name": name, "type_hint": None, "default": None}
+
+        if node.type == "dictionary_splat_pattern":
+            name = "**" + (node.children[1].text.decode("utf-8") if len(node.children) > 1 else "kwargs")
+            return {"name": name, "type_hint": None, "default": None}
+
+        return None
 
     def _get_module_path(self, file_path: Path) -> str:
         parts = list(file_path.with_suffix("").parts)

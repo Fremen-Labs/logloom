@@ -232,6 +232,9 @@ class GoScanner:
             # Lexical context
             ctx = self._get_lexical_context(method_node)
 
+            # Phase B: Extract function signature
+            sig = ctx.pop("_signature", None)
+
             sites.append(LogCallSite(
                 file_path=str(file_path),
                 module_path=self._get_module_path(file_path),
@@ -242,6 +245,7 @@ class GoScanner:
                 line=line,
                 column=method_node.start_point.column,
                 lexical_context=ctx,
+                signature=sig,
             ))
 
         return sites
@@ -497,6 +501,7 @@ class GoScanner:
           - defer_statement, go_statement
         """
         enclosing_func = None
+        func_decl_node = None  # Phase B: keep reference for signature extraction
         receiver_type = None
         in_if = False
         in_loop = False
@@ -512,12 +517,14 @@ class GoScanner:
 
             if ptype == "function_declaration":
                 if not enclosing_func:
+                    func_decl_node = parent
                     name_node = parent.child_by_field_name("name")
                     if name_node:
                         enclosing_func = name_node.text.decode("utf-8")
 
             elif ptype == "method_declaration":
                 if not enclosing_func:
+                    func_decl_node = parent
                     name_node = parent.child_by_field_name("name")
                     if name_node:
                         enclosing_func = name_node.text.decode("utf-8")
@@ -573,6 +580,9 @@ class GoScanner:
         if receiver_type and enclosing_func:
             enclosing_func = receiver_type + "." + enclosing_func
 
+        # Phase B: Extract function signature from the enclosing function node
+        sig = self._extract_go_signature(func_decl_node) if func_decl_node else None
+
         return {
             "enclosing_function": enclosing_func,
             "function": enclosing_func,
@@ -584,7 +594,76 @@ class GoScanner:
             "in_defer": in_defer,
             "in_goroutine": in_goroutine,
             "in_closure": in_closure,
+            "_signature": sig,  # Popped by caller before storing
         }
+
+    # ── Phase B: Go function signature extraction ──────────────────────────────
+
+    def _extract_go_signature(self, func_node) -> Optional[dict]:
+        """Extract function signature from a Go function/method declaration.
+
+        Go AST for: func (s *Server) HandleAuth(ctx context.Context, req *Request) (bool, error)
+          method_declaration
+            receiver: parameter_list
+            name: identifier "HandleAuth"
+            parameters: parameter_list
+              parameter_declaration name: "ctx"  type: "context.Context"
+              parameter_declaration name: "req"  type: "*Request"
+            result: parameter_list (or type_identifier for single return)
+        """
+        if not func_node:
+            return None
+
+        params = []
+        return_type = None
+
+        # Extract parameters (skip receiver for methods — it's not an API param)
+        params_node = func_node.child_by_field_name("parameters")
+        if params_node:
+            for child in params_node.children:
+                if child.type == "parameter_declaration":
+                    p = self._extract_go_param(child)
+                    if p:
+                        params.extend(p)
+
+        # Extract return type
+        result_node = func_node.child_by_field_name("result")
+        if result_node:
+            return_type = result_node.text.decode("utf-8").strip()
+            # Clean up parenthesized multi-return: (bool, error) stays as-is
+            # Single type: just "error" or "*Response"
+
+        return {
+            "parameters": params,
+            "return_type": return_type,
+            "is_async": False,  # Go doesn't have async keyword
+            "decorators": [],   # Go doesn't have decorators
+        }
+
+    def _extract_go_param(self, param_decl) -> list[dict]:
+        """Extract parameters from a Go parameter_declaration.
+
+        Go allows grouped params: (a, b int) which is a single parameter_declaration
+        with multiple identifier children and one type child.
+        """
+        results = []
+        type_node = param_decl.child_by_field_name("type")
+        type_hint = type_node.text.decode("utf-8") if type_node else None
+
+        # Collect all identifier children (parameter names)
+        names = []
+        for child in param_decl.children:
+            if child.type == "identifier":
+                names.append(child.text.decode("utf-8"))
+
+        if not names:
+            # Unnamed parameter (e.g., func(_ int))
+            return [{"name": "_", "type_hint": type_hint, "default": None}]
+
+        for name in names:
+            results.append({"name": name, "type_hint": type_hint, "default": None})
+
+        return results
 
     # ── Module path ───────────────────────────────────────────────────────────
 

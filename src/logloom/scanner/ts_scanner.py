@@ -148,6 +148,9 @@ class TypeScriptScanner:
             message = self._extract_string(first_arg_node, source)
             ctx = self._get_lexical_context(method_node)
 
+            # Phase B: Extract function signature
+            sig = ctx.pop("_signature", None)
+
             sites.append(LogCallSite(
                 file_path=str(file_path),
                 module_path=self._get_module_path(file_path),
@@ -158,6 +161,7 @@ class TypeScriptScanner:
                 line=line,
                 column=method_node.start_point.column,
                 lexical_context=ctx,
+                signature=sig,
             ))
 
         return sites
@@ -215,6 +219,7 @@ class TypeScriptScanner:
           - async functions
         """
         enclosing_func = None
+        func_node = None  # Phase B: keep reference for signature extraction
         class_name = None
         in_try = False
         in_catch = False
@@ -223,6 +228,7 @@ class TypeScriptScanner:
         in_switch = False
         is_async = False
         in_closure = False
+        decorators = []
 
         parent = node.parent
         while parent:
@@ -231,6 +237,7 @@ class TypeScriptScanner:
             # Function declarations: function foo() {}
             if ptype == "function_declaration":
                 if not enclosing_func:
+                    func_node = parent
                     name_node = parent.child_by_field_name("name")
                     if name_node:
                         enclosing_func = name_node.text.decode("utf-8")
@@ -238,21 +245,39 @@ class TypeScriptScanner:
                     for child in parent.children:
                         if child.type == "async":
                             is_async = True
+                    # Extract decorators from preceding siblings
+                    sibling = parent.prev_sibling
+                    while sibling and sibling.type == "decorator":
+                        decorators.append(sibling.text.decode("utf-8").lstrip("@"))
+                        sibling = sibling.prev_sibling
+                    decorators.reverse()
                 else:
                     in_closure = True
 
             # Method definitions: class Foo { bar() {} }
             elif ptype == "method_definition":
                 if not enclosing_func:
+                    func_node = parent
                     name_node = parent.child_by_field_name("name")
                     if name_node:
                         enclosing_func = name_node.text.decode("utf-8")
+                    # Check for async
+                    for child in parent.children:
+                        if child.type == "async":
+                            is_async = True
+                    # Extract decorators from preceding siblings
+                    sibling = parent.prev_sibling
+                    while sibling and sibling.type == "decorator":
+                        decorators.append(sibling.text.decode("utf-8").lstrip("@"))
+                        sibling = sibling.prev_sibling
+                    decorators.reverse()
                 else:
                     in_closure = True
 
             # Arrow functions: const foo = () => {}
             elif ptype == "arrow_function":
                 if not enclosing_func:
+                    func_node = parent
                     # Arrow functions assigned to const/let/var
                     if parent.parent and parent.parent.type == "variable_declarator":
                         name_node = parent.parent.child_by_field_name("name")
@@ -272,6 +297,7 @@ class TypeScriptScanner:
             # Anonymous functions: function() {}
             elif ptype == "function":
                 if not enclosing_func:
+                    func_node = parent
                     name_node = parent.child_by_field_name("name")
                     if name_node:
                         enclosing_func = name_node.text.decode("utf-8")
@@ -279,6 +305,10 @@ class TypeScriptScanner:
                         name_node = parent.parent.child_by_field_name("name")
                         if name_node:
                             enclosing_func = name_node.text.decode("utf-8")
+                    # Check for async
+                    for child in parent.children:
+                        if child.type == "async":
+                            is_async = True
                 else:
                     in_closure = True
 
@@ -317,6 +347,9 @@ class TypeScriptScanner:
         if class_name and enclosing_func:
             qualified = class_name + "." + enclosing_func
 
+        # Phase B: Extract function signature from the enclosing function node
+        sig = self._extract_ts_signature(func_node, is_async, decorators) if func_node else None
+
         return {
             "enclosing_function": enclosing_func,
             "function": qualified or enclosing_func,
@@ -328,7 +361,98 @@ class TypeScriptScanner:
             "in_switch": in_switch,
             "is_async": is_async,
             "in_closure": in_closure,
+            "_signature": sig,  # Popped by caller
         }
+
+    # ── Phase B: TypeScript function signature extraction ────────────────────
+
+    def _extract_ts_signature(self, func_node, is_async: bool, decorators: list) -> Optional[dict]:
+        """Extract function signature from a TS/JS function AST node.
+
+        Handles function_declaration, method_definition, arrow_function, and function.
+        TS AST for: async function foo(x: string, y: number = 5): boolean
+          function_declaration
+            name: identifier "foo"
+            parameters: formal_parameters
+              required_parameter / optional_parameter
+            return_type: type_annotation
+        """
+        if not func_node:
+            return None
+
+        params = []
+        return_type = None
+
+        # Extract parameters from formal_parameters
+        params_node = func_node.child_by_field_name("parameters")
+        if not params_node:
+            # Arrow functions and some forms use "parameter" or have inline params
+            for child in func_node.children:
+                if child.type == "formal_parameters":
+                    params_node = child
+                    break
+
+        if params_node:
+            for child in params_node.children:
+                p = self._extract_ts_param(child)
+                if p:
+                    params.append(p)
+
+        # Extract return type annotation
+        ret_node = func_node.child_by_field_name("return_type")
+        if ret_node:
+            return_type = ret_node.text.decode("utf-8").strip()
+            # Remove leading ": " from type annotations
+            if return_type.startswith(":"):
+                return_type = return_type[1:].strip()
+
+        return {
+            "parameters": params,
+            "return_type": return_type,
+            "is_async": is_async,
+            "decorators": decorators,
+        }
+
+    def _extract_ts_param(self, node) -> Optional[dict]:
+        """Extract a single parameter from a TS/JS formal_parameters child.
+
+        Handles:
+          - identifier: plain param (no type)
+          - required_parameter: param with type (x: string)
+          - optional_parameter: param with ? (x?: string)
+          - assignment_pattern: param with default (x = 5)
+        """
+        if node.type in ("(", ")", ","):
+            return None
+
+        if node.type == "identifier":
+            return {"name": node.text.decode("utf-8"), "type_hint": None, "default": None}
+
+        if node.type in ("required_parameter", "optional_parameter"):
+            name_node = node.child_by_field_name("pattern")
+            if not name_node:
+                # Fallback: first identifier child
+                for child in node.children:
+                    if child.type == "identifier":
+                        name_node = child
+                        break
+            type_node = node.child_by_field_name("type")
+            name = name_node.text.decode("utf-8") if name_node else "?"
+            type_hint = None
+            if type_node:
+                type_hint = type_node.text.decode("utf-8").strip()
+                if type_hint.startswith(":"):
+                    type_hint = type_hint[1:].strip()
+            return {"name": name, "type_hint": type_hint, "default": None}
+
+        if node.type == "assignment_pattern":
+            left = node.child_by_field_name("left")
+            right = node.child_by_field_name("right")
+            name = left.text.decode("utf-8") if left else "?"
+            default = right.text.decode("utf-8") if right else None
+            return {"name": name, "type_hint": None, "default": default}
+
+        return None
 
     # ── Module path ───────────────────────────────────────────────────────────
 
