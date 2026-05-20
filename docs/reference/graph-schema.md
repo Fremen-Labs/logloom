@@ -15,6 +15,7 @@ The knowledge graph produced by `logloom build` adheres to a strict JSON schema 
 | `nodes` | Object | A map where the keys are the `ll:` node IDs and the values are `GraphNode` objects. |
 | `coverage` | Object (Optional) | Scan completeness and logging coverage metrics. Adheres to the [CoverageMetrics](#coveragemetrics-object) schema. |
 | `models` | Object | A map from model name to [ModelDefinition](#modeldefinition-object) objects. |
+| `imports` | Object | A map where the keys are module names and the values are lists of imported modules. |
 
 ## GraphNode Object
 

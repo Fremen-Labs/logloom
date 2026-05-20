@@ -78,6 +78,7 @@ class LogLoomGraph(BaseModel):
     redacted_patterns: List[str] = Field(default_factory=list)
     coverage: Optional[CoverageMetrics] = None
     models: Dict[str, ModelDefinition] = Field(default_factory=dict)
+    imports: Dict[str, List[str]] = Field(default_factory=dict)
 
     def save(self, path: str):
         with open(path, "w") as f:

@@ -68,6 +68,7 @@ class GraphBuilder:
         enable_git: bool = True,
         enable_coverage: bool = True,
         enable_models: bool = True,
+        enable_imports: bool = True,
         languages: Optional[List[str]] = None,
     ) -> LogLoomGraph:
         """Build the LogLoom knowledge graph from source files.
@@ -233,6 +234,13 @@ class GraphBuilder:
             try:
                 from ..scanner.model_scanner import scan_models
                 graph.models = scan_models(source_paths, languages)
+            except Exception:
+                pass
+
+        if enable_imports:
+            try:
+                from ..intelligence.import_graph import compute_imports
+                graph.imports = compute_imports(source_paths, languages)
             except Exception:
                 pass
 
