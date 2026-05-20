@@ -13,6 +13,7 @@ The knowledge graph produced by `logloom build` adheres to a strict JSON schema 
 | `branch` | String (Optional) | The Git branch at the time of the build. |
 | `redacted_patterns` | Array of Strings | List of redaction patterns applied during the build. |
 | `nodes` | Object | A map where the keys are the `ll:` node IDs and the values are `GraphNode` objects. |
+| `coverage` | Object (Optional) | Scan completeness and logging coverage metrics. Adheres to the [CoverageMetrics](#coveragemetrics-object) schema. |
 
 ## GraphNode Object
 
@@ -49,3 +50,12 @@ The knowledge graph produced by `logloom build` adheres to a strict JSON schema 
 | `name` | String | The parameter name (excluding `self`/`cls` in Python). |
 | `type_hint` | String (Optional) | The type annotation or type hint for this parameter. |
 | `default` | String (Optional) | The default value for this parameter if defined in the signature. |
+
+## CoverageMetrics Object
+
+| Field | Type | Description |
+| :--- | :--- | :--- |
+| `total_functions` | Integer | Total number of defined functions/methods found in the scanned files. |
+| `instrumented_functions` | Integer | Number of defined functions containing at least one log call. |
+| `coverage_pct` | Float | Percentage of functions that are instrumented (range: `0.0` - `100.0`). |
+| `uninstrumented` | Array of Strings | Qualified names of defined functions that do not contain any log call sites (format: `module:function`). |

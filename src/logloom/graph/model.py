@@ -43,6 +43,14 @@ class GraphNode(BaseModel):
     # Phase B: Function signature of the enclosing function.
     signature: Optional[FunctionSignature] = None
 
+class CoverageMetrics(BaseModel):
+    """Scan completeness and code-base logging coverage metrics."""
+    total_functions: int
+    instrumented_functions: int
+    coverage_pct: float
+    uninstrumented: List[str] = Field(default_factory=list)
+
+
 class LogLoomGraph(BaseModel):
     """The full knowledge graph artifact."""
     schema_version: str = "1.2"
@@ -52,6 +60,7 @@ class LogLoomGraph(BaseModel):
     branch: Optional[str] = None
     nodes: Dict[str, GraphNode]
     redacted_patterns: List[str] = Field(default_factory=list)
+    coverage: Optional[CoverageMetrics] = None
 
     def save(self, path: str):
         with open(path, "w") as f:

@@ -11,9 +11,10 @@ from ..graph.store import save_graph
 @click.option("--git/--no-git", default=True, help="Embed git metadata (commit SHA, branch).")
 @click.option("--tags/--no-tags", default=True, help="Run semantic tag auto-inference.")
 @click.option("--call-graph/--no-call-graph", default=True, help="Resolve inter-function call-graph edges.")
+@click.option("--coverage/--no-coverage", default=True, help="Compute scan completeness and log coverage metrics.")
 @click.option("--languages", default="python", help="Comma-separated languages: python,go,typescript.")
 @click.option("--name", "project_name", default=None, help="Project name (auto-detected from pyproject.toml or directory).")
-def build(source: str, output: str, verbose: bool, redact_patterns: str, git: bool, tags: bool, call_graph: bool, languages: str, project_name: str):
+def build(source: str, output: str, verbose: bool, redact_patterns: str, git: bool, tags: bool, call_graph: bool, coverage: bool, languages: str, project_name: str):
     """Build the LogLoom knowledge graph from source code."""
     source_path = Path(source)
     if not source_path.exists():
@@ -31,6 +32,7 @@ def build(source: str, output: str, verbose: bool, redact_patterns: str, git: bo
         enable_tags=tags,
         enable_call_graph=call_graph,
         enable_git=git,
+        enable_coverage=coverage,
         languages=lang_list,
     )
 
@@ -49,6 +51,8 @@ def build(source: str, output: str, verbose: bool, redact_patterns: str, git: bo
         parts.append(f"{tag_count} tags")
     if edge_count:
         parts.append(f"{edge_count} edges")
+    if graph.coverage:
+        parts.append(f"{graph.coverage.coverage_pct}% coverage ({graph.coverage.instrumented_functions}/{graph.coverage.total_functions} functions)")
     if graph.commit_sha:
         parts.append(f"commit {graph.commit_sha[:8]}")
 

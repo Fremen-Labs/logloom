@@ -66,6 +66,7 @@ class GraphBuilder:
         enable_tags: bool = True,
         enable_call_graph: bool = True,
         enable_git: bool = True,
+        enable_coverage: bool = True,
         languages: Optional[List[str]] = None,
     ) -> LogLoomGraph:
         """Build the LogLoom knowledge graph from source files.
@@ -218,6 +219,13 @@ class GraphBuilder:
                 from ..intelligence.git_meta import enrich_graph_with_git
                 graph = enrich_graph_with_git(graph)
             except ImportError:
+                pass
+
+        if enable_coverage:
+            try:
+                from ..intelligence.coverage import compute_coverage
+                graph.coverage = compute_coverage(graph, source_paths, languages)
+            except Exception:
                 pass
 
         return graph
