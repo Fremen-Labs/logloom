@@ -303,6 +303,10 @@ class GoScanner:
         if operand and operand.type == "identifier":
             pkg_name = operand.text.decode("utf-8")
             if pkg_name in _NON_LOG_PACKAGES:
+                # Exception: fmt.Print/Printf/Println are treated as log calls
+                method_name = method_node.text.decode("utf-8")
+                if pkg_name == "fmt" and method_name in {"Print", "Printf", "Println"}:
+                    return False
                 return True
 
         return False

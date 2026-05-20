@@ -1,0 +1,1185 @@
+{
+  "schema_version": "2.0",
+  "project": "logloom",
+  "built_at": "2026-05-20T17:09:52.173711+00:00",
+  "commit_sha": "3172111dacfef0d807403406aadb012f3b29c201",
+  "branch": "feature/testing-updates",
+  "nodes": {
+    "ll:df6e6cdabf1f": {
+      "node_id": "ll:df6e6cdabf1f",
+      "file": "/Users/jonathandoughty/clients/fremenlabs/fremen/logloom/logloom/src/logloom/intelligence/import_graph.py",
+      "module": "logloom.intelligence.import_graph",
+      "function": "compute_imports",
+      "level": "debug",
+      "message_template": "Failed to extract Python imports from {}: {}",
+      "line": 53,
+      "semantic_tags": [
+        "debug",
+        "error",
+        "http"
+      ],
+      "lexical_parents": [
+        "compute_imports"
+      ],
+      "call_parents": [],
+      "call_children": [],
+      "call_parent_names": [],
+      "call_child_names": [],
+      "signature": {
+        "parameters": [
+          {
+            "name": "source_paths",
+            "type_hint": "List[Path]",
+            "default": null
+          },
+          {
+            "name": "languages",
+            "type_hint": "List[str]",
+            "default": null
+          },
+          {
+            "name": "include_external",
+            "type_hint": "bool",
+            "default": "False"
+          },
+          {
+            "name": "pre_extracted_imports",
+            "type_hint": "Optional[Dict[str, List[str]]]",
+            "default": "None"
+          }
+        ],
+        "return_type": "Dict[str, List[str]]",
+        "is_async": false,
+        "decorators": []
+      }
+    },
+    "ll:fa24ceebe9bd": {
+      "node_id": "ll:fa24ceebe9bd",
+      "file": "/Users/jonathandoughty/clients/fremenlabs/fremen/logloom/logloom/src/logloom/intelligence/import_graph.py",
+      "module": "logloom.intelligence.import_graph",
+      "function": "compute_imports",
+      "level": "debug",
+      "message_template": "Failed to extract Go imports from {}: {}",
+      "line": 62,
+      "semantic_tags": [
+        "debug",
+        "error",
+        "http"
+      ],
+      "lexical_parents": [
+        "compute_imports"
+      ],
+      "call_parents": [],
+      "call_children": [],
+      "call_parent_names": [],
+      "call_child_names": [],
+      "signature": {
+        "parameters": [
+          {
+            "name": "source_paths",
+            "type_hint": "List[Path]",
+            "default": null
+          },
+          {
+            "name": "languages",
+            "type_hint": "List[str]",
+            "default": null
+          },
+          {
+            "name": "include_external",
+            "type_hint": "bool",
+            "default": "False"
+          },
+          {
+            "name": "pre_extracted_imports",
+            "type_hint": "Optional[Dict[str, List[str]]]",
+            "default": "None"
+          }
+        ],
+        "return_type": "Dict[str, List[str]]",
+        "is_async": false,
+        "decorators": []
+      }
+    },
+    "ll:a68a239e4aef": {
+      "node_id": "ll:a68a239e4aef",
+      "file": "/Users/jonathandoughty/clients/fremenlabs/fremen/logloom/logloom/src/logloom/intelligence/import_graph.py",
+      "module": "logloom.intelligence.import_graph",
+      "function": "compute_imports",
+      "level": "debug",
+      "message_template": "Failed to extract TypeScript imports from {}: {}",
+      "line": 69,
+      "semantic_tags": [
+        "debug",
+        "error",
+        "http"
+      ],
+      "lexical_parents": [
+        "compute_imports"
+      ],
+      "call_parents": [],
+      "call_children": [],
+      "call_parent_names": [],
+      "call_child_names": [],
+      "signature": {
+        "parameters": [
+          {
+            "name": "source_paths",
+            "type_hint": "List[Path]",
+            "default": null
+          },
+          {
+            "name": "languages",
+            "type_hint": "List[str]",
+            "default": null
+          },
+          {
+            "name": "include_external",
+            "type_hint": "bool",
+            "default": "False"
+          },
+          {
+            "name": "pre_extracted_imports",
+            "type_hint": "Optional[Dict[str, List[str]]]",
+            "default": "None"
+          }
+        ],
+        "return_type": "Dict[str, List[str]]",
+        "is_async": false,
+        "decorators": []
+      }
+    },
+    "ll:6cd8aeba7dea": {
+      "node_id": "ll:6cd8aeba7dea",
+      "file": "/Users/jonathandoughty/clients/fremenlabs/fremen/logloom/logloom/src/logloom/intelligence/coverage.py",
+      "module": "logloom.intelligence.coverage",
+      "function": "compute_coverage",
+      "level": "debug",
+      "message_template": "Failed to extract Python functions from {}: {}",
+      "line": 61,
+      "semantic_tags": [
+        "debug",
+        "error",
+        "http"
+      ],
+      "lexical_parents": [
+        "compute_coverage"
+      ],
+      "call_parents": [],
+      "call_children": [],
+      "call_parent_names": [],
+      "call_child_names": [],
+      "signature": {
+        "parameters": [
+          {
+            "name": "graph",
+            "type_hint": "LogLoomGraph",
+            "default": null
+          },
+          {
+            "name": "source_paths",
+            "type_hint": "List[Path]",
+            "default": null
+          },
+          {
+            "name": "languages",
+            "type_hint": "List[str]",
+            "default": null
+          },
+          {
+            "name": "defined_functions",
+            "type_hint": "Optional[Set[str]]",
+            "default": "None"
+          }
+        ],
+        "return_type": "CoverageMetrics",
+        "is_async": false,
+        "decorators": []
+      }
+    },
+    "ll:01bbf87da7c6": {
+      "node_id": "ll:01bbf87da7c6",
+      "file": "/Users/jonathandoughty/clients/fremenlabs/fremen/logloom/logloom/src/logloom/intelligence/coverage.py",
+      "module": "logloom.intelligence.coverage",
+      "function": "compute_coverage",
+      "level": "debug",
+      "message_template": "Failed to extract Go functions from {}: {}",
+      "line": 70,
+      "semantic_tags": [
+        "debug",
+        "error",
+        "http"
+      ],
+      "lexical_parents": [
+        "compute_coverage"
+      ],
+      "call_parents": [],
+      "call_children": [],
+      "call_parent_names": [],
+      "call_child_names": [],
+      "signature": {
+        "parameters": [
+          {
+            "name": "graph",
+            "type_hint": "LogLoomGraph",
+            "default": null
+          },
+          {
+            "name": "source_paths",
+            "type_hint": "List[Path]",
+            "default": null
+          },
+          {
+            "name": "languages",
+            "type_hint": "List[str]",
+            "default": null
+          },
+          {
+            "name": "defined_functions",
+            "type_hint": "Optional[Set[str]]",
+            "default": "None"
+          }
+        ],
+        "return_type": "CoverageMetrics",
+        "is_async": false,
+        "decorators": []
+      }
+    },
+    "ll:827349320927": {
+      "node_id": "ll:827349320927",
+      "file": "/Users/jonathandoughty/clients/fremenlabs/fremen/logloom/logloom/src/logloom/intelligence/coverage.py",
+      "module": "logloom.intelligence.coverage",
+      "function": "compute_coverage",
+      "level": "debug",
+      "message_template": "Failed to extract TypeScript functions from {}: {}",
+      "line": 76,
+      "semantic_tags": [
+        "debug",
+        "error",
+        "http"
+      ],
+      "lexical_parents": [
+        "compute_coverage"
+      ],
+      "call_parents": [],
+      "call_children": [],
+      "call_parent_names": [],
+      "call_child_names": [],
+      "signature": {
+        "parameters": [
+          {
+            "name": "graph",
+            "type_hint": "LogLoomGraph",
+            "default": null
+          },
+          {
+            "name": "source_paths",
+            "type_hint": "List[Path]",
+            "default": null
+          },
+          {
+            "name": "languages",
+            "type_hint": "List[str]",
+            "default": null
+          },
+          {
+            "name": "defined_functions",
+            "type_hint": "Optional[Set[str]]",
+            "default": "None"
+          }
+        ],
+        "return_type": "CoverageMetrics",
+        "is_async": false,
+        "decorators": []
+      }
+    },
+    "ll:888d7e72b9e0": {
+      "node_id": "ll:888d7e72b9e0",
+      "file": "/Users/jonathandoughty/clients/fremenlabs/fremen/logloom/logloom/src/logloom/scanner/model_scanner.py",
+      "module": "logloom.scanner.model_scanner",
+      "function": "scan_models",
+      "level": "debug",
+      "message_template": "Failed to extract Python models from {}: {}",
+      "line": 78,
+      "semantic_tags": [
+        "debug",
+        "error"
+      ],
+      "lexical_parents": [
+        "scan_models"
+      ],
+      "call_parents": [],
+      "call_children": [],
+      "call_parent_names": [],
+      "call_child_names": [],
+      "signature": {
+        "parameters": [
+          {
+            "name": "source_paths",
+            "type_hint": "List[Path]",
+            "default": null
+          },
+          {
+            "name": "languages",
+            "type_hint": "List[str]",
+            "default": null
+          },
+          {
+            "name": "pre_extracted_models",
+            "type_hint": "Optional[Dict[str, ModelDefinition]]",
+            "default": "None"
+          }
+        ],
+        "return_type": "Dict[str, ModelDefinition]",
+        "is_async": false,
+        "decorators": []
+      }
+    },
+    "ll:01548dc51ea2": {
+      "node_id": "ll:01548dc51ea2",
+      "file": "/Users/jonathandoughty/clients/fremenlabs/fremen/logloom/logloom/src/logloom/scanner/model_scanner.py",
+      "module": "logloom.scanner.model_scanner",
+      "function": "scan_models",
+      "level": "debug",
+      "message_template": "Failed to extract Go models from {}: {}",
+      "line": 88,
+      "semantic_tags": [
+        "debug",
+        "error"
+      ],
+      "lexical_parents": [
+        "scan_models"
+      ],
+      "call_parents": [],
+      "call_children": [],
+      "call_parent_names": [],
+      "call_child_names": [],
+      "signature": {
+        "parameters": [
+          {
+            "name": "source_paths",
+            "type_hint": "List[Path]",
+            "default": null
+          },
+          {
+            "name": "languages",
+            "type_hint": "List[str]",
+            "default": null
+          },
+          {
+            "name": "pre_extracted_models",
+            "type_hint": "Optional[Dict[str, ModelDefinition]]",
+            "default": "None"
+          }
+        ],
+        "return_type": "Dict[str, ModelDefinition]",
+        "is_async": false,
+        "decorators": []
+      }
+    },
+    "ll:ec2f88e2b178": {
+      "node_id": "ll:ec2f88e2b178",
+      "file": "/Users/jonathandoughty/clients/fremenlabs/fremen/logloom/logloom/src/logloom/scanner/model_scanner.py",
+      "module": "logloom.scanner.model_scanner",
+      "function": "scan_models",
+      "level": "debug",
+      "message_template": "Failed to extract TypeScript models from {}: {}",
+      "line": 96,
+      "semantic_tags": [
+        "debug",
+        "error"
+      ],
+      "lexical_parents": [
+        "scan_models"
+      ],
+      "call_parents": [],
+      "call_children": [],
+      "call_parent_names": [],
+      "call_child_names": [],
+      "signature": {
+        "parameters": [
+          {
+            "name": "source_paths",
+            "type_hint": "List[Path]",
+            "default": null
+          },
+          {
+            "name": "languages",
+            "type_hint": "List[str]",
+            "default": null
+          },
+          {
+            "name": "pre_extracted_models",
+            "type_hint": "Optional[Dict[str, ModelDefinition]]",
+            "default": "None"
+          }
+        ],
+        "return_type": "Dict[str, ModelDefinition]",
+        "is_async": false,
+        "decorators": []
+      }
+    },
+    "ll:4c27385bb767": {
+      "node_id": "ll:4c27385bb767",
+      "file": "/Users/jonathandoughty/clients/fremenlabs/fremen/logloom/logloom/src/logloom/scanner/go_scanner.py",
+      "module": "logloom.scanner.go_scanner",
+      "function": "unknown",
+      "level": "error",
+      "message_template": "msg",
+      "line": 53,
+      "semantic_tags": [
+        "error"
+      ],
+      "lexical_parents": [],
+      "call_parents": [],
+      "call_children": [],
+      "call_parent_names": [],
+      "call_child_names": [],
+      "signature": null
+    },
+    "ll:4c27385bb767:6fd3": {
+      "node_id": "ll:4c27385bb767:6fd3",
+      "file": "/Users/jonathandoughty/clients/fremenlabs/fremen/logloom/logloom/src/logloom/scanner/go_scanner.py",
+      "module": "logloom.scanner.go_scanner",
+      "function": "unknown",
+      "level": "error",
+      "message_template": "msg",
+      "line": 317,
+      "semantic_tags": [
+        "error"
+      ],
+      "lexical_parents": [],
+      "call_parents": [],
+      "call_children": [],
+      "call_parent_names": [],
+      "call_child_names": [],
+      "signature": null
+    }
+  },
+  "redacted_patterns": [],
+  "coverage": {
+    "total_functions": 150,
+    "instrumented_functions": 3,
+    "coverage_pct": 2.0,
+    "uninstrumented": [
+      "logloom.cli.build:build",
+      "logloom.cli.diff_cmd:diff",
+      "logloom.cli.es_cmd:es",
+      "logloom.cli.es_cmd:export",
+      "logloom.cli.es_cmd:mapping",
+      "logloom.cli.es_cmd:pipeline",
+      "logloom.cli.es_cmd:ship",
+      "logloom.cli.graph_cmd:_show_flat",
+      "logloom.cli.graph_cmd:_show_tree",
+      "logloom.cli.graph_cmd:find",
+      "logloom.cli.graph_cmd:graph",
+      "logloom.cli.graph_cmd:imports",
+      "logloom.cli.graph_cmd:models",
+      "logloom.cli.graph_cmd:show",
+      "logloom.cli.graph_cmd:stats",
+      "logloom.cli.graph_cmd:viz",
+      "logloom.cli.init:init",
+      "logloom.cli.lint:lint",
+      "logloom.cli.main:cli",
+      "logloom.elasticsearch.mapping:generate_component_template",
+      "logloom.elasticsearch.mapping:generate_enrich_pipeline",
+      "logloom.elasticsearch.mapping:generate_enrich_policy",
+      "logloom.elasticsearch.mapping:generate_enrichment_documents",
+      "logloom.elasticsearch.mapping:generate_index_template",
+      "logloom.elasticsearch.mapping:render_mapping_json",
+      "logloom.elasticsearch.shipper:_generate_index_creation_body",
+      "logloom.elasticsearch.shipper:export_ndjson",
+      "logloom.elasticsearch.shipper:ship_to_elasticsearch",
+      "logloom.graph.builder:_detect_project_name",
+      "logloom.graph.builder:_extract_file_data",
+      "logloom.graph.builder:build",
+      "logloom.graph.builder:deserialize_site",
+      "logloom.graph.cache:__init__",
+      "logloom.graph.cache:calculate_file_hash",
+      "logloom.graph.cache:clean_unused_entries",
+      "logloom.graph.cache:get_file_entry",
+      "logloom.graph.cache:load",
+      "logloom.graph.cache:save",
+      "logloom.graph.cache:set_file_entry",
+      "logloom.graph.hasher:__init__",
+      "logloom.graph.hasher:generate_node_id",
+      "logloom.graph.model:is_required",
+      "logloom.graph.model:load",
+      "logloom.graph.model:save",
+      "logloom.graph.store:_discover_graph",
+      "logloom.graph.store:_walk_up_for_graph",
+      "logloom.graph.store:load_graph",
+      "logloom.graph.store:save_graph",
+      "logloom.intelligence.call_graph:__init__",
+      "logloom.intelligence.call_graph:_extract_go_callees",
+      "logloom.intelligence.call_graph:_extract_python_callees",
+      "logloom.intelligence.call_graph:_extract_python_calls",
+      "logloom.intelligence.call_graph:_extract_receiver_type",
+      "logloom.intelligence.call_graph:_extract_var_decl_closures",
+      "logloom.intelligence.call_graph:_find_func_literals",
+      "logloom.intelligence.call_graph:_get_caller_module",
+      "logloom.intelligence.call_graph:_get_module_path",
+      "logloom.intelligence.call_graph:_is_inlinable_closure",
+      "logloom.intelligence.call_graph:_resolve_callee",
+      "logloom.intelligence.call_graph:_resolve_callee_targets",
+      "logloom.intelligence.call_graph:_scan_file",
+      "logloom.intelligence.call_graph:_walk_calls",
+      "logloom.intelligence.call_graph:_walk_closure_or_call_statement",
+      "logloom.intelligence.call_graph:_walk_go_declarations",
+      "logloom.intelligence.call_graph:_walk_python_functions",
+      "logloom.intelligence.call_graph:extract_calls",
+      "logloom.intelligence.call_graph:resolve",
+      "logloom.intelligence.coverage:_extract_go_functions",
+      "logloom.intelligence.coverage:_extract_python_functions",
+      "logloom.intelligence.coverage:_extract_ts_functions",
+      "logloom.intelligence.coverage:_get_matches",
+      "logloom.intelligence.diff:diff_graphs",
+      "logloom.intelligence.diff:has_changes",
+      "logloom.intelligence.diff:summary",
+      "logloom.intelligence.diff:total_changes",
+      "logloom.intelligence.git_meta:_run_git",
+      "logloom.intelligence.git_meta:enrich_graph_with_git",
+      "logloom.intelligence.git_meta:get_git_metadata",
+      "logloom.intelligence.import_graph:_extract_go_imports",
+      "logloom.intelligence.import_graph:_extract_python_imports",
+      "logloom.intelligence.import_graph:_extract_ts_imports",
+      "logloom.intelligence.import_graph:_filter_internal_imports",
+      "logloom.intelligence.import_graph:_get_go_module_path",
+      "logloom.intelligence.import_graph:_get_py_module_path",
+      "logloom.intelligence.import_graph:_get_ts_module_path",
+      "logloom.intelligence.import_graph:walk",
+      "logloom.intelligence.tagger:_tags_from_context",
+      "logloom.intelligence.tagger:_tags_from_decorators",
+      "logloom.intelligence.tagger:_tags_from_function",
+      "logloom.intelligence.tagger:_tags_from_message",
+      "logloom.intelligence.tagger:_tags_from_module",
+      "logloom.intelligence.tagger:infer_tags",
+      "logloom.logger.resolver:__init__",
+      "logloom.logger.resolver:_resolve_template",
+      "logloom.logger.resolver:_template_to_pattern",
+      "logloom.logger.resolver:resolve",
+      "logloom.logger.wrapper:__init__",
+      "logloom.logger.wrapper:_enrich_event",
+      "logloom.logger.wrapper:critical",
+      "logloom.logger.wrapper:debug",
+      "logloom.logger.wrapper:error",
+      "logloom.logger.wrapper:exception",
+      "logloom.logger.wrapper:get_logger",
+      "logloom.logger.wrapper:info",
+      "logloom.logger.wrapper:warning",
+      "logloom.otel.bridge:__call__",
+      "logloom.otel.bridge:__init__",
+      "logloom.otel.bridge:get_otel_resource_attributes",
+      "logloom.otel.bridge:install",
+      "logloom.otel.bridge:patched_makeRecord",
+      "logloom.otel.bridge:uninstall",
+      "logloom.scanner.go_scanner:__init__",
+      "logloom.scanner.go_scanner:_collect_binary_parts",
+      "logloom.scanner.go_scanner:_extract_binary_expression",
+      "logloom.scanner.go_scanner:_extract_go_param",
+      "logloom.scanner.go_scanner:_extract_go_signature",
+      "logloom.scanner.go_scanner:_extract_string",
+      "logloom.scanner.go_scanner:_get_lexical_context",
+      "logloom.scanner.go_scanner:_get_module_path",
+      "logloom.scanner.go_scanner:_is_nested_in_argument_list",
+      "logloom.scanner.go_scanner:_is_non_log_package_call",
+      "logloom.scanner.go_scanner:_is_zap_field_constructor",
+      "logloom.scanner.go_scanner:_resolve_zerolog_level",
+      "logloom.scanner.go_scanner:available",
+      "logloom.scanner.go_scanner:scan_file",
+      "logloom.scanner.model_scanner:_extract_go_models",
+      "logloom.scanner.model_scanner:_extract_python_models",
+      "logloom.scanner.model_scanner:_extract_ts_models",
+      "logloom.scanner.model_scanner:_get_matches",
+      "logloom.scanner.model_scanner:_get_module_path",
+      "logloom.scanner.python_scanner:__init__",
+      "logloom.scanner.python_scanner:_extract_param",
+      "logloom.scanner.python_scanner:_extract_signature",
+      "logloom.scanner.python_scanner:_extract_string",
+      "logloom.scanner.python_scanner:_get_lexical_context",
+      "logloom.scanner.python_scanner:_get_module_path",
+      "logloom.scanner.python_scanner:scan_file",
+      "logloom.scanner.regex_fallback:_get_module_path",
+      "logloom.scanner.regex_fallback:regex_fallback_scan",
+      "logloom.scanner.ts_scanner:__init__",
+      "logloom.scanner.ts_scanner:_extract_string",
+      "logloom.scanner.ts_scanner:_extract_ts_param",
+      "logloom.scanner.ts_scanner:_extract_ts_signature",
+      "logloom.scanner.ts_scanner:_get_lexical_context",
+      "logloom.scanner.ts_scanner:_get_module_path",
+      "logloom.scanner.ts_scanner:available",
+      "logloom.scanner.ts_scanner:scan_file"
+    ]
+  },
+  "models": {
+    "logloom.intelligence.git_meta.GitMetadata": {
+      "name": "GitMetadata",
+      "file": "/Users/jonathandoughty/clients/fremenlabs/fremen/logloom/logloom/src/logloom/intelligence/git_meta.py",
+      "line": 16,
+      "base_classes": [],
+      "fields": [
+        {
+          "name": "commit_sha",
+          "type_hint": "Optional[str]",
+          "default": "None"
+        },
+        {
+          "name": "branch",
+          "type_hint": "Optional[str]",
+          "default": "None"
+        },
+        {
+          "name": "author",
+          "type_hint": "Optional[str]",
+          "default": "None"
+        },
+        {
+          "name": "dirty",
+          "type_hint": "bool",
+          "default": "False"
+        }
+      ]
+    },
+    "logloom.intelligence.diff.NodeChange": {
+      "name": "NodeChange",
+      "file": "/Users/jonathandoughty/clients/fremenlabs/fremen/logloom/logloom/src/logloom/intelligence/diff.py",
+      "line": 16,
+      "base_classes": [],
+      "fields": [
+        {
+          "name": "node_id",
+          "type_hint": "str",
+          "default": null
+        },
+        {
+          "name": "change_type",
+          "type_hint": "str",
+          "default": null
+        },
+        {
+          "name": "old_node",
+          "type_hint": "Optional[GraphNode]",
+          "default": "None"
+        },
+        {
+          "name": "new_node",
+          "type_hint": "Optional[GraphNode]",
+          "default": "None"
+        },
+        {
+          "name": "details",
+          "type_hint": "str",
+          "default": "\"\""
+        }
+      ]
+    },
+    "logloom.intelligence.diff.GraphDiff": {
+      "name": "GraphDiff",
+      "file": "/Users/jonathandoughty/clients/fremenlabs/fremen/logloom/logloom/src/logloom/intelligence/diff.py",
+      "line": 26,
+      "base_classes": [],
+      "fields": [
+        {
+          "name": "old_version",
+          "type_hint": "str",
+          "default": null
+        },
+        {
+          "name": "new_version",
+          "type_hint": "str",
+          "default": null
+        },
+        {
+          "name": "added",
+          "type_hint": "List[NodeChange]",
+          "default": "field(default_factory=list)"
+        },
+        {
+          "name": "removed",
+          "type_hint": "List[NodeChange]",
+          "default": "field(default_factory=list)"
+        },
+        {
+          "name": "moved",
+          "type_hint": "List[NodeChange]",
+          "default": "field(default_factory=list)"
+        },
+        {
+          "name": "modified",
+          "type_hint": "List[NodeChange]",
+          "default": "field(default_factory=list)"
+        }
+      ]
+    },
+    "logloom.graph.model.Parameter": {
+      "name": "Parameter",
+      "file": "/Users/jonathandoughty/clients/fremenlabs/fremen/logloom/logloom/src/logloom/graph/model.py",
+      "line": 8,
+      "base_classes": [
+        "BaseModel"
+      ],
+      "fields": [
+        {
+          "name": "name",
+          "type_hint": "str",
+          "default": null
+        },
+        {
+          "name": "type_hint",
+          "type_hint": "Optional[str]",
+          "default": "None"
+        },
+        {
+          "name": "default",
+          "type_hint": "Optional[str]",
+          "default": "None"
+        }
+      ]
+    },
+    "logloom.graph.model.FunctionSignature": {
+      "name": "FunctionSignature",
+      "file": "/Users/jonathandoughty/clients/fremenlabs/fremen/logloom/logloom/src/logloom/graph/model.py",
+      "line": 14,
+      "base_classes": [
+        "BaseModel"
+      ],
+      "fields": [
+        {
+          "name": "parameters",
+          "type_hint": "List[Parameter]",
+          "default": "Field(default_factory=list)"
+        },
+        {
+          "name": "return_type",
+          "type_hint": "Optional[str]",
+          "default": "None"
+        },
+        {
+          "name": "is_async",
+          "type_hint": "bool",
+          "default": "False"
+        },
+        {
+          "name": "decorators",
+          "type_hint": "List[str]",
+          "default": "Field(default_factory=list)"
+        }
+      ]
+    },
+    "logloom.graph.model.GraphNode": {
+      "name": "GraphNode",
+      "file": "/Users/jonathandoughty/clients/fremenlabs/fremen/logloom/logloom/src/logloom/graph/model.py",
+      "line": 27,
+      "base_classes": [
+        "BaseModel"
+      ],
+      "fields": [
+        {
+          "name": "node_id",
+          "type_hint": "str",
+          "default": null
+        },
+        {
+          "name": "file",
+          "type_hint": "str",
+          "default": null
+        },
+        {
+          "name": "module",
+          "type_hint": "str",
+          "default": null
+        },
+        {
+          "name": "function",
+          "type_hint": "str",
+          "default": null
+        },
+        {
+          "name": "level",
+          "type_hint": "str",
+          "default": null
+        },
+        {
+          "name": "message_template",
+          "type_hint": "str",
+          "default": null
+        },
+        {
+          "name": "line",
+          "type_hint": "int",
+          "default": null
+        },
+        {
+          "name": "semantic_tags",
+          "type_hint": "List[str]",
+          "default": "Field(default_factory=list)"
+        },
+        {
+          "name": "lexical_parents",
+          "type_hint": "List[str]",
+          "default": "Field(default_factory=list)"
+        },
+        {
+          "name": "call_parents",
+          "type_hint": "List[str]",
+          "default": "Field(default_factory=list)"
+        },
+        {
+          "name": "call_children",
+          "type_hint": "List[str]",
+          "default": "Field(default_factory=list)"
+        },
+        {
+          "name": "call_parent_names",
+          "type_hint": "List[str]",
+          "default": "Field(default_factory=list)"
+        },
+        {
+          "name": "call_child_names",
+          "type_hint": "List[str]",
+          "default": "Field(default_factory=list)"
+        },
+        {
+          "name": "signature",
+          "type_hint": "Optional[FunctionSignature]",
+          "default": "None"
+        }
+      ]
+    },
+    "logloom.graph.model.CoverageMetrics": {
+      "name": "CoverageMetrics",
+      "file": "/Users/jonathandoughty/clients/fremenlabs/fremen/logloom/logloom/src/logloom/graph/model.py",
+      "line": 46,
+      "base_classes": [
+        "BaseModel"
+      ],
+      "fields": [
+        {
+          "name": "total_functions",
+          "type_hint": "int",
+          "default": null
+        },
+        {
+          "name": "instrumented_functions",
+          "type_hint": "int",
+          "default": null
+        },
+        {
+          "name": "coverage_pct",
+          "type_hint": "float",
+          "default": null
+        },
+        {
+          "name": "uninstrumented",
+          "type_hint": "List[str]",
+          "default": "Field(default_factory=list)"
+        }
+      ]
+    },
+    "logloom.graph.model.ModelField": {
+      "name": "ModelField",
+      "file": "/Users/jonathandoughty/clients/fremenlabs/fremen/logloom/logloom/src/logloom/graph/model.py",
+      "line": 54,
+      "base_classes": [
+        "BaseModel"
+      ],
+      "fields": [
+        {
+          "name": "name",
+          "type_hint": "str",
+          "default": null
+        },
+        {
+          "name": "type_hint",
+          "type_hint": "Optional[str]",
+          "default": "None"
+        },
+        {
+          "name": "default",
+          "type_hint": "Optional[str]",
+          "default": "None"
+        }
+      ]
+    },
+    "logloom.graph.model.ModelDefinition": {
+      "name": "ModelDefinition",
+      "file": "/Users/jonathandoughty/clients/fremenlabs/fremen/logloom/logloom/src/logloom/graph/model.py",
+      "line": 65,
+      "base_classes": [
+        "BaseModel"
+      ],
+      "fields": [
+        {
+          "name": "name",
+          "type_hint": "str",
+          "default": null
+        },
+        {
+          "name": "file",
+          "type_hint": "str",
+          "default": null
+        },
+        {
+          "name": "line",
+          "type_hint": "int",
+          "default": null
+        },
+        {
+          "name": "base_classes",
+          "type_hint": "List[str]",
+          "default": "Field(default_factory=list)"
+        },
+        {
+          "name": "fields",
+          "type_hint": "List[ModelField]",
+          "default": "Field(default_factory=list)"
+        }
+      ]
+    },
+    "logloom.graph.model.LogLoomGraph": {
+      "name": "LogLoomGraph",
+      "file": "/Users/jonathandoughty/clients/fremenlabs/fremen/logloom/logloom/src/logloom/graph/model.py",
+      "line": 74,
+      "base_classes": [
+        "BaseModel"
+      ],
+      "fields": [
+        {
+          "name": "schema_version",
+          "type_hint": "str",
+          "default": "\"2.0\""
+        },
+        {
+          "name": "project",
+          "type_hint": "str",
+          "default": null
+        },
+        {
+          "name": "built_at",
+          "type_hint": "str",
+          "default": null
+        },
+        {
+          "name": "commit_sha",
+          "type_hint": "Optional[str]",
+          "default": "None"
+        },
+        {
+          "name": "branch",
+          "type_hint": "Optional[str]",
+          "default": "None"
+        },
+        {
+          "name": "nodes",
+          "type_hint": "Dict[str, GraphNode]",
+          "default": null
+        },
+        {
+          "name": "redacted_patterns",
+          "type_hint": "List[str]",
+          "default": "Field(default_factory=list)"
+        },
+        {
+          "name": "coverage",
+          "type_hint": "Optional[CoverageMetrics]",
+          "default": "None"
+        },
+        {
+          "name": "models",
+          "type_hint": "Dict[str, ModelDefinition]",
+          "default": "Field(default_factory=dict)"
+        },
+        {
+          "name": "imports",
+          "type_hint": "Dict[str, List[str]]",
+          "default": "Field(default_factory=dict)"
+        }
+      ]
+    },
+    "logloom.scanner.base.LogCallSite": {
+      "name": "LogCallSite",
+      "file": "/Users/jonathandoughty/clients/fremenlabs/fremen/logloom/logloom/src/logloom/scanner/base.py",
+      "line": 6,
+      "base_classes": [],
+      "fields": [
+        {
+          "name": "file_path",
+          "type_hint": "str",
+          "default": null
+        },
+        {
+          "name": "module_path",
+          "type_hint": "str",
+          "default": null
+        },
+        {
+          "name": "class_name",
+          "type_hint": "Optional[str]",
+          "default": null
+        },
+        {
+          "name": "function_name",
+          "type_hint": "str",
+          "default": null
+        },
+        {
+          "name": "log_level",
+          "type_hint": "str",
+          "default": null
+        },
+        {
+          "name": "message_template",
+          "type_hint": "str",
+          "default": null
+        },
+        {
+          "name": "line",
+          "type_hint": "int",
+          "default": null
+        },
+        {
+          "name": "column",
+          "type_hint": "int",
+          "default": null
+        },
+        {
+          "name": "lexical_context",
+          "type_hint": "dict",
+          "default": "None"
+        },
+        {
+          "name": "signature",
+          "type_hint": "dict",
+          "default": "None"
+        }
+      ]
+    }
+  },
+  "imports": {
+    "logloom.__init__": [
+      "logloom.graph.model",
+      "logloom.logger.wrapper"
+    ],
+    "logloom.__version__": [],
+    "logloom._compat": [],
+    "logloom.logger.wrapper": [
+      "logloom.graph.store",
+      "logloom.logger.resolver"
+    ],
+    "logloom.logger.resolver": [
+      "logloom.graph.model"
+    ],
+    "logloom.intelligence.git_meta": [
+      "logloom.graph.model"
+    ],
+    "logloom.intelligence.import_graph": [],
+    "logloom.intelligence.__init__": [],
+    "logloom.intelligence.coverage": [
+      "logloom.graph.model"
+    ],
+    "logloom.intelligence.tagger": [
+      "logloom.graph.model"
+    ],
+    "logloom.intelligence.diff": [
+      "logloom.graph.model"
+    ],
+    "logloom.intelligence.call_graph": [
+      "logloom.graph.model"
+    ],
+    "logloom.graph.store": [
+      "logloom.graph.model"
+    ],
+    "logloom.graph.cache": [
+      "logloom.scanner.base"
+    ],
+    "logloom.graph.__init__": [],
+    "logloom.graph.model": [],
+    "logloom.graph.builder": [
+      "logloom.graph.cache",
+      "logloom.graph.hasher",
+      "logloom.graph.model",
+      "logloom.intelligence.call_graph",
+      "logloom.intelligence.coverage",
+      "logloom.intelligence.git_meta",
+      "logloom.intelligence.import_graph",
+      "logloom.intelligence.tagger",
+      "logloom.scanner.base",
+      "logloom.scanner.go_scanner",
+      "logloom.scanner.model_scanner",
+      "logloom.scanner.python_scanner",
+      "logloom.scanner.regex_fallback",
+      "logloom.scanner.ts_scanner"
+    ],
+    "logloom.graph.hasher": [
+      "logloom.graph.model"
+    ],
+    "logloom.otel.bridge": [
+      "logloom.graph.model",
+      "logloom.graph.store",
+      "logloom.logger.resolver"
+    ],
+    "logloom.otel.__init__": [],
+    "logloom.cli.build": [
+      "logloom.graph.builder",
+      "logloom.graph.store"
+    ],
+    "logloom.cli.graph_cmd": [
+      "logloom.graph.store"
+    ],
+    "logloom.cli.es_cmd": [
+      "logloom.elasticsearch.mapping",
+      "logloom.elasticsearch.shipper",
+      "logloom.graph.store"
+    ],
+    "logloom.cli.diff_cmd": [
+      "logloom.graph.model",
+      "logloom.intelligence.diff"
+    ],
+    "logloom.cli.init": [],
+    "logloom.cli.main": [
+      "logloom.cli.build",
+      "logloom.cli.diff_cmd",
+      "logloom.cli.es_cmd",
+      "logloom.cli.graph_cmd",
+      "logloom.cli.init",
+      "logloom.cli.lint"
+    ],
+    "logloom.cli.lint": [
+      "logloom.graph.store",
+      "logloom.scanner.python_scanner",
+      "logloom.scanner.regex_fallback"
+    ],
+    "logloom.scanner.regex_fallback": [
+      "logloom.scanner.base"
+    ],
+    "logloom.scanner.__init__": [],
+    "logloom.scanner.model_scanner": [
+      "logloom.graph.model"
+    ],
+    "logloom.scanner.go_scanner": [
+      "logloom.scanner.base",
+      "logloom.scanner.queries.go_logs"
+    ],
+    "logloom.scanner.base": [],
+    "logloom.scanner.python_scanner": [
+      "logloom.scanner.base",
+      "logloom.scanner.queries.python_logs"
+    ],
+    "logloom.scanner.ts_scanner": [
+      "logloom.scanner.base",
+      "logloom.scanner.queries.ts_logs"
+    ],
+    "logloom.elasticsearch.shipper": [
+      "logloom.elasticsearch.mapping",
+      "logloom.graph.model"
+    ],
+    "logloom.elasticsearch.__init__": [],
+    "logloom.elasticsearch.mapping": [
+      "logloom.graph.model"
+    ],
+    "logloom.scanner.queries.__init__": [],
+    "logloom.scanner.queries.python_logs": [],
+    "logloom.scanner.queries.ts_logs": [],
+    "logloom.scanner.queries.go_logs": []
+  }
+}
