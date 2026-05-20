@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "logloom"
-version = "0.3.3"
+version = "0.3.4"
 description = "Weave your codebase into every log line. AST-powered semantic provenance for logs."
 readme = "README.md"
 license = {text = "MIT"}
