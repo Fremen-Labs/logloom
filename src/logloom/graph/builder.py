@@ -194,7 +194,7 @@ class GraphBuilder:
             )
 
         graph = LogLoomGraph(
-            schema_version="1.2",
+            schema_version="2.0",
             project=project_name,
             built_at=datetime.now(timezone.utc).isoformat(),
             nodes=nodes,

@@ -11,7 +11,7 @@ from pathlib import Path
 
 import pytest
 
-from logloom.graph.model import LogLoomGraph, GraphNode
+from logloom.graph.model import LogLoomGraph, GraphNode, FunctionSignature, Parameter
 from logloom.elasticsearch.mapping import (
     generate_component_template,
     generate_index_template,
@@ -32,6 +32,9 @@ from logloom.otel.bridge import (
     ATTR_CALL_CHILDREN,
     ATTR_GRAPH_VERSION,
     ATTR_COMMIT_SHA,
+    ATTR_CALL_PARENT_NAMES,
+    ATTR_CALL_CHILD_NAMES,
+    ATTR_SIGNATURE,
 )
 
 
@@ -56,6 +59,17 @@ def rich_graph():
                 lexical_parents=["try:token_check", "AuthService"],
                 call_parents=["handle_request"],
                 call_children=["validate_token", "log_audit"],
+                call_parent_names=["handle_request_flow"],
+                call_child_names=["check_token", "write_audit"],
+                signature=FunctionSignature(
+                    parameters=[
+                        Parameter(name="username", type_hint="str", default=None),
+                        Parameter(name="password", type_hint="str", default=None),
+                    ],
+                    return_type="bool",
+                    is_async=True,
+                    decorators=["require_https"],
+                ),
             ),
             "ll:auth002": GraphNode(
                 node_id="ll:auth002",
@@ -227,7 +241,7 @@ class TestOTELBridgeEndToEnd:
         attrs = get_otel_resource_attributes(rich_graph)
 
         assert attrs["logloom.project"] == "test-ecosystem"
-        assert attrs["logloom.schema_version"] == "1.2"
+        assert attrs["logloom.schema_version"] == "2.0"
         assert attrs["logloom.node_count"] == 4
         assert attrs["logloom.commit_sha"] == "abc123def456"
         assert attrs["logloom.branch"] == "main"
@@ -283,11 +297,63 @@ class TestOTELBridgeEndToEnd:
                 exc_info=None,
                 func="authenticate",
             )
-            # Note: enrichment depends on resolver finding the match.
-            # With the test graph, the resolver may or may not find an exact match
-            # since module name resolution depends on the caller frame.
-            # What we verify is that makeRecord was patched without crash.
             assert record is not None
-            assert record.msg == "User login attempt"
+            assert getattr(record, "logloom_node_id", None) == "ll:auth001"
+            assert getattr(record, "logloom_module", None) == "auth.service"
+            assert getattr(record, "logloom_function", None) == "authenticate"
+            assert getattr(record, "logloom_tags", None) == ["auth", "security"]
+            assert getattr(record, "logloom_call_parents", None) == ["handle_request"]
+            assert getattr(record, "logloom_call_children", None) == ["validate_token", "log_audit"]
+            assert getattr(record, "logloom_call_parent_names", None) == ["handle_request_flow"]
+            assert getattr(record, "logloom_call_child_names", None) == ["check_token", "write_audit"]
+            sig = getattr(record, "logloom_signature", None)
+            assert sig is not None
+            assert sig["return_type"] == "bool"
+            assert sig["is_async"] is True
+            assert sig["decorators"] == ["require_https"]
+            assert sig["parameters"] == [
+                {"name": "username", "type_hint": "str", "default": None},
+                {"name": "password", "type_hint": "str", "default": None},
+            ]
         finally:
             handler.uninstall()
+
+    def test_processor_enriches_v2_fields(self, rich_graph):
+        """Processor should enrich structlog events with all v2 fields when matched."""
+        import sys
+        from unittest.mock import MagicMock
+
+        processor = LogLoomOTELProcessor(graph=rich_graph)
+
+        # Mock sys._getframe to simulate a deep call stack matching auth.service:authenticate
+        mock_frame = MagicMock()
+        mock_frame.f_globals = {"__name__": "auth.service"}
+        mock_frame.f_code.co_name = "authenticate"
+
+        original_getframe = sys._getframe
+        def mock_getframe(depth):
+            if depth == 6:
+                return mock_frame
+            return original_getframe(depth)
+
+        sys._getframe = mock_getframe
+        try:
+            event_dict = {"event": "User login attempt"}
+            result = processor(None, "info", event_dict)
+
+            assert result[ATTR_NODE_ID] == "ll:auth001"
+            assert result[ATTR_MODULE] == "auth.service"
+            assert result[ATTR_FUNCTION] == "authenticate"
+            assert result[ATTR_TAGS] == ["auth", "security"]
+            assert result[ATTR_CALL_PARENTS] == ["handle_request"]
+            assert result[ATTR_CALL_CHILDREN] == ["validate_token", "log_audit"]
+            assert result[ATTR_CALL_PARENT_NAMES] == ["handle_request_flow"]
+            assert result[ATTR_CALL_CHILD_NAMES] == ["check_token", "write_audit"]
+            assert result[ATTR_SIGNATURE]["return_type"] == "bool"
+            assert result[ATTR_SIGNATURE]["is_async"] is True
+            assert result[ATTR_SIGNATURE]["parameters"] == [
+                {"name": "username", "type_hint": "str", "default": None},
+                {"name": "password", "type_hint": "str", "default": None},
+            ]
+        finally:
+            sys._getframe = original_getframe

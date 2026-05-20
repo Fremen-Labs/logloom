@@ -33,6 +33,9 @@ ATTR_TAGS = "logloom.tags"
 ATTR_TRAVERSAL = "logloom.traversal"
 ATTR_CALL_PARENTS = "logloom.call_parents"
 ATTR_CALL_CHILDREN = "logloom.call_children"
+ATTR_CALL_PARENT_NAMES = "logloom.call_parent_names"
+ATTR_CALL_CHILD_NAMES = "logloom.call_child_names"
+ATTR_SIGNATURE = "logloom.signature"
 ATTR_GRAPH_VERSION = "logloom.graph_version"
 ATTR_COMMIT_SHA = "logloom.commit_sha"
 
@@ -90,6 +93,12 @@ class LogLoomOTELProcessor:
                         event_dict[ATTR_CALL_PARENTS] = node.call_parents
                     if node.call_children:
                         event_dict[ATTR_CALL_CHILDREN] = node.call_children
+                    if node.call_parent_names:
+                        event_dict[ATTR_CALL_PARENT_NAMES] = node.call_parent_names
+                    if node.call_child_names:
+                        event_dict[ATTR_CALL_CHILD_NAMES] = node.call_child_names
+                    if node.signature:
+                        event_dict[ATTR_SIGNATURE] = node.signature.model_dump()
                     if self._graph.commit_sha:
                         event_dict[ATTR_COMMIT_SHA] = self._graph.commit_sha
         except Exception:
@@ -155,6 +164,16 @@ class LogLoomOTELHandler:
                             record.logloom_tags = node.semantic_tags
                             record.logloom_file = node.file
                             record.logloom_line = node.line
+                            if node.call_parents:
+                                record.logloom_call_parents = node.call_parents
+                            if node.call_children:
+                                record.logloom_call_children = node.call_children
+                            if node.call_parent_names:
+                                record.logloom_call_parent_names = node.call_parent_names
+                            if node.call_child_names:
+                                record.logloom_call_child_names = node.call_child_names
+                            if node.signature:
+                                record.logloom_signature = node.signature.model_dump()
                 except Exception:
                     pass  # Never crash
 

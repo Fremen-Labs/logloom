@@ -32,8 +32,19 @@ class LogLoomLogger:
             if node_id:
                 kw["logloom.node_id"] = node_id
                 node = self.graph.nodes.get(node_id)
-                if node and node.lexical_parents:
-                    kw["logloom.traversal"] = node.lexical_parents
+                if node:
+                    if node.lexical_parents:
+                        kw["logloom.traversal"] = node.lexical_parents
+                    if node.call_parents:
+                        kw["logloom.call_parents"] = node.call_parents
+                    if node.call_children:
+                        kw["logloom.call_children"] = node.call_children
+                    if node.call_parent_names:
+                        kw["logloom.call_parent_names"] = node.call_parent_names
+                    if node.call_child_names:
+                        kw["logloom.call_child_names"] = node.call_child_names
+                    if node.signature:
+                        kw["logloom.signature"] = node.signature.model_dump()
         except Exception:
             # Safety net: never crash the application because of logging
             pass

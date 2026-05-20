@@ -69,7 +69,7 @@ class ModelDefinition(BaseModel):
 
 class LogLoomGraph(BaseModel):
     """The full knowledge graph artifact."""
-    schema_version: str = "1.2"
+    schema_version: str = "2.0"
     project: str
     built_at: str
     commit_sha: Optional[str] = None
