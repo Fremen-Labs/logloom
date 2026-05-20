@@ -599,7 +599,7 @@ class GoScanner:
 
     # ── Phase B: Go function signature extraction ──────────────────────────────
 
-    def _extract_go_signature(self, func_node) -> dict | None:
+    def _extract_go_signature(self, func_node) -> Optional[dict]:
         """Extract function signature from a Go function/method declaration.
 
         Go AST for: func (s *Server) HandleAuth(ctx context.Context, req *Request) (bool, error)

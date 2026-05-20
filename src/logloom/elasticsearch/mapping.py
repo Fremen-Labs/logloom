@@ -11,7 +11,7 @@ Two output modes:
 from __future__ import annotations
 
 import json
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 from ..graph.model import LogLoomGraph
 
@@ -129,7 +129,7 @@ def generate_component_template(
 
 def generate_index_template(
     template_name: str = "logloom-logs",
-    index_patterns: list[str] | None = None,
+    index_patterns: Optional[List[str]] = None,
     priority: int = 200,
     number_of_shards: int = 1,
     number_of_replicas: int = 1,

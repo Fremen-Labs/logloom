@@ -366,7 +366,7 @@ class TypeScriptScanner:
 
     # ── Phase B: TypeScript function signature extraction ────────────────────
 
-    def _extract_ts_signature(self, func_node, is_async: bool, decorators: list) -> dict | None:
+    def _extract_ts_signature(self, func_node, is_async: bool, decorators: list) -> Optional[dict]:
         """Extract function signature from a TS/JS function AST node.
 
         Handles function_declaration, method_definition, arrow_function, and function.
@@ -413,7 +413,7 @@ class TypeScriptScanner:
             "decorators": decorators,
         }
 
-    def _extract_ts_param(self, node) -> dict | None:
+    def _extract_ts_param(self, node) -> Optional[dict]:
         """Extract a single parameter from a TS/JS formal_parameters child.
 
         Handles:

@@ -229,7 +229,7 @@ class PythonScanner:
             "decorators": decorators,
         }
 
-    def _extract_param(self, node) -> dict | None:
+    def _extract_param(self, node) -> Optional[dict]:
         """Extract a single parameter from the AST.
 
         Handles:
