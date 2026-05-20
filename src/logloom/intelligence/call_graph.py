@@ -56,7 +56,7 @@ _GO_CALL_QUERY = """
 class CallGraphResolver:
     """Builds inter-function call edges from source AST and maps them to graph nodes.
 
-    Supports both Python and Go source files.
+    Supports Python, Go, and TypeScript/JavaScript source files.
     """
 
     def __init__(self):
@@ -71,6 +71,13 @@ class CallGraphResolver:
         self._go_resolver: Optional[_GoCallGraphResolver] = None
         try:
             self._go_resolver = _GoCallGraphResolver()
+        except ImportError:
+            pass
+
+        # TypeScript/JavaScript support (optional — requires tree_sitter_typescript)
+        self._ts_resolver: Optional[_TsCallGraphResolver] = None
+        try:
+            self._ts_resolver = _TsCallGraphResolver()
         except ImportError:
             pass
 
@@ -210,34 +217,64 @@ class CallGraphResolver:
         # The graph stores "module.function" (e.g. "elastro.core.index.create")
         # while call_map stores "module.Class.function" (e.g. "elastro.core.index.IndexManager.create").
         # We need to find all call_map keys that could correspond to each graph function.
+        #
+        # Optimization: pre-index call_map keys by bare function name for O(1) lookup
+        # instead of iterating all call_map keys per graph node.
+        cm_keys_by_bare: Dict[str, List[str]] = {}
+        for cm_key in call_map:
+            # Extract bare function name from the end of the key
+            # "src/routes/auth.checkUser" → "checkUser"
+            # "elastro.core.index.IndexManager.create" → "create"
+            for sep in (".", "/"):
+                if sep in cm_key:
+                    bare = cm_key.rsplit(sep, 1)[-1]
+                    cm_keys_by_bare.setdefault(bare, []).append(cm_key)
+                    break
+            else:
+                cm_keys_by_bare.setdefault(cm_key, []).append(cm_key)
+
         graph_qname_to_call_map_keys: Dict[str, List[str]] = {}
         for node in graph.nodes.values():
             q = f"{node.module}.{node.function}" if node.module else node.function
             if q in graph_qname_to_call_map_keys:
                 continue
+
             matching_keys = []
             bare = node.function.rsplit(".", 1)[-1] if "." in node.function else node.function
             mod = node.module or ""
-            for cm_key in call_map:
+
+            # Normalize module separators for comparison (TS uses "/", Python uses ".")
+            mod_normalized = mod.replace("/", ".")
+
+            for cm_key in cm_keys_by_bare.get(bare, []):
                 # Exact match
                 if cm_key == q:
                     matching_keys.append(cm_key)
+                    continue
+                # Normalize the call_map key's module portion
+                cm_mod_raw = cm_key.rsplit(f".{bare}", 1)[0] if f".{bare}" in cm_key else ""
+                if not cm_mod_raw:
+                    # Try "/" separator (TS paths)
+                    parts = cm_key.rsplit("/", 1)
+                    if len(parts) == 2:
+                        cm_mod_raw = parts[0]
+                        cm_bare = parts[1].rsplit(".", 1)[-1] if "." in parts[1] else parts[1]
+                        if cm_bare != bare:
+                            continue
+                    else:
+                        continue
+                cm_mod_normalized = cm_mod_raw.replace("/", ".")
+
                 # Same module with class prefix: "mod.Class.func" matches "mod.func"
-                elif mod and cm_key.endswith(f".{bare}") and cm_key.startswith(f"{mod}."):
+                if mod_normalized and cm_mod_normalized.startswith(mod_normalized):
                     matching_keys.append(cm_key)
-                # Module suffix match for truncated modules:
-                # call_map has "elastro.core.index.IndexManager.create"
-                # graph has "core.index.create"
-                elif mod and cm_key.endswith(f".{bare}"):
-                    cm_parts = cm_key.rsplit(f".{bare}", 1)[0]
-                    if cm_parts.endswith(mod) or mod.endswith(cm_parts.split(".")[-len(mod.split(".")):][0] if cm_parts else ""):
-                        # Check if module segments overlap
-                        mod_parts = mod.split(".")
-                        cm_mod_parts = cm_parts.split(".")
-                        # The call_map module should end with the graph module segments
-                        if len(mod_parts) <= len(cm_mod_parts):
-                            if cm_mod_parts[-len(mod_parts):] == mod_parts:
-                                matching_keys.append(cm_key)
+                # Module suffix match: graph "core.index" matches call_map "elastro.core.index.IndexManager"
+                elif mod_normalized and cm_mod_normalized.endswith(mod_normalized):
+                    matching_keys.append(cm_key)
+                # TS path match: graph "src/routes/auth" matches call_map "src/routes/auth.Class"
+                elif mod and cm_key.startswith(mod):
+                    matching_keys.append(cm_key)
+
             graph_qname_to_call_map_keys[q] = matching_keys
 
         # Also build reverse: call_map key → graph qnames it could represent
@@ -246,35 +283,42 @@ class CallGraphResolver:
             for cmk in cm_keys:
                 call_map_key_to_graph_qnames.setdefault(cmk, []).append(gq)
 
-        # Step 4: For each node, populate call_parents and call_children
+        # Step 4: Pre-compute parent edges in a single pass over the call_map.
+        # Instead of O(nodes × call_map) nested iteration, iterate call_map once
+        # and for each callee resolution, record the parent edge by target qname.
+        # This is O(call_map_entries × callees_per_entry).
+        parent_edges: Dict[str, Set[str]] = {}       # target_qname → {caller_qnames}
+        parent_node_edges: Dict[str, Set[str]] = {}  # target_qname → {caller_node_ids}
+
+        for caller_qname, callees in call_map.items():
+            for callee in callees:
+                targets = _resolve_callee_targets(caller_qname, callee)
+                for target_qname in targets:
+                    if target_qname != caller_qname:
+                        parent_edges.setdefault(target_qname, set()).add(caller_qname)
+                        # Find node IDs of caller — check both direct and bridged
+                        p_ids = qualified_func_to_nodes.get(caller_qname, [])
+                        if not p_ids:
+                            for gq in call_map_key_to_graph_qnames.get(caller_qname, []):
+                                p_ids = qualified_func_to_nodes.get(gq, [])
+                                if p_ids:
+                                    break
+                        for p_id in p_ids:
+                            parent_node_edges.setdefault(target_qname, set()).add(p_id)
+
+        # Step 5: Assemble final nodes with parent + child edges.
         new_nodes: Dict[str, GraphNode] = {}
         for node_id, node in graph.nodes.items():
-            parents: Set[str] = set()
-            parent_names: Set[str] = set()
+            q_node_func = f"{node.module}.{node.function}" if node.module else node.function
+
+            # Parent edges: look up from pre-computed maps
+            parents = parent_node_edges.get(q_node_func, set())
+            parent_names = parent_edges.get(q_node_func, set())
+
+            # Child edges: check all bridged call_map keys for this node
             children: Set[str] = set()
             child_names: Set[str] = set()
 
-            q_node_func = f"{node.module}.{node.function}" if node.module else node.function
-
-            # Find parent functions (functions that call this node's function)
-            for caller_qname, callees in call_map.items():
-                for callee in callees:
-                    targets = _resolve_callee_targets(caller_qname, callee)
-                    if q_node_func in targets and caller_qname != q_node_func:
-                        # Find node IDs of caller — check both direct and bridged matches
-                        parent_node_ids = qualified_func_to_nodes.get(caller_qname, [])
-                        if not parent_node_ids:
-                            # Bridge: call_map key might map to a different graph qname
-                            for gq in call_map_key_to_graph_qnames.get(caller_qname, []):
-                                parent_node_ids.extend(qualified_func_to_nodes.get(gq, []))
-                        for p_id in parent_node_ids:
-                            parents.add(p_id)
-                        # Track caller name — use human-readable form
-                        caller_bare = caller_qname.rsplit(".", 1)[-1]
-                        parent_names.add(caller_qname)
-
-            # Find child functions (functions called by this node's function)
-            # Check all call_map keys that bridge to this graph qname
             cm_keys_for_node = graph_qname_to_call_map_keys.get(q_node_func, [])
             if q_node_func in call_map:
                 cm_keys_for_node = list(set(cm_keys_for_node + [q_node_func]))
@@ -307,6 +351,8 @@ class CallGraphResolver:
         elif file_path.suffix == ".go" and self._go_resolver:
             if not file_path.name.endswith("_test.go"):
                 self._go_resolver.extract_calls(file_path, module_path, call_map)
+        elif file_path.suffix in (".ts", ".tsx", ".js", ".jsx", ".mjs") and self._ts_resolver:
+            self._ts_resolver.extract_calls(file_path, module_path, call_map)
 
     def _get_module_path(self, file_path: Path) -> str:
         if file_path.suffix == ".py":
@@ -735,3 +781,312 @@ _PYTHON_BUILTIN_SKIP = frozenset({
     "debug", "info", "warning", "error", "critical", "exception",
     "fatal", "log",
 })
+
+
+# ── TypeScript/JavaScript call-graph resolver ──────────────────────────────────
+
+# TS/JS builtins and common library calls that don't produce meaningful edges
+_TS_BUILTIN_SKIP = frozenset({
+    # Language builtins
+    "parseInt", "parseFloat", "isNaN", "isFinite", "encodeURIComponent",
+    "decodeURIComponent", "encodeURI", "decodeURI", "setTimeout", "setInterval",
+    "clearTimeout", "clearInterval", "require", "Symbol",
+    # Console/log methods — already captured as graph nodes
+    "log", "info", "warn", "error", "debug", "trace", "fatal", "verbose",
+    # Common object/array/string builtins
+    "push", "pop", "shift", "unshift", "splice", "slice", "concat",
+    "map", "filter", "reduce", "forEach", "find", "findIndex", "some", "every",
+    "includes", "indexOf", "join", "split", "trim", "replace", "match",
+    "keys", "values", "entries", "assign", "freeze", "defineProperty",
+    "hasOwnProperty", "toString", "valueOf", "toUpperCase", "toLowerCase",
+    "startsWith", "endsWith", "padStart", "padEnd", "substring", "charAt",
+    "sort", "reverse", "flat", "flatMap", "fill",
+    # Promise methods
+    "then", "catch", "finally", "resolve", "reject", "all", "allSettled", "race",
+    # JSON
+    "parse", "stringify",
+    # Type checking
+    "typeof", "instanceof",
+})
+
+# TS/JS object prefixes whose method calls should not produce edges
+_TS_OBJECT_SKIP = frozenset({
+    "console", "JSON", "Math", "Object", "Array", "String", "Number",
+    "Boolean", "Date", "RegExp", "Promise", "Set", "Map", "WeakMap",
+    "WeakSet", "Buffer", "process", "Error", "TypeError", "RangeError",
+    "Reflect", "Proxy", "Intl", "Symbol",
+    # Logging — already captured
+    "logger", "log", "console",
+})
+
+
+class _TsCallGraphResolver:
+    """Tree-sitter-based call-graph resolver for TypeScript/JavaScript files.
+
+    Extracts function/method/arrow-function declarations and the calls within them,
+    producing caller → {callee, ...} edges. Handles:
+      - function_declaration: function foo() { bar() }
+      - method_definition:    class X { foo() { bar() } }
+      - arrow_function assigned to variable: const foo = () => bar()
+      - arrow_function as export default: export default async () => {}
+      - Hono/Express route handlers (inlined closures)
+    """
+
+    def __init__(self):
+        import tree_sitter_typescript as ts_typescript
+        try:
+            self.language = Language(ts_typescript.language_typescript())
+        except TypeError:
+            self.language = Language(ts_typescript.language_typescript(), "typescript")
+        self.parser = Parser(self.language)
+
+    def extract_calls(
+        self, file_path: Path, module_path: str, call_map: Dict[str, Set[str]]
+    ):
+        """Parse a TypeScript/JavaScript file and populate call_map."""
+        try:
+            with open(file_path, "rb") as f:
+                source = f.read()
+        except (IOError, OSError):
+            return
+
+        tree = self.parser.parse(source)
+        self._walk_declarations(
+            tree.root_node, module_path, call_map, source, class_stack=[]
+        )
+
+    def _walk_declarations(
+        self,
+        node,
+        module_path: str,
+        call_map: Dict[str, Set[str]],
+        source: bytes,
+        class_stack: List[str],
+    ):
+        """Recursively find function/method/arrow declarations and extract call edges."""
+        ntype = node.type
+
+        # ── Class declarations ────────────────────────────────────────────────
+        if ntype in ("class_declaration", "class"):
+            name_node = node.child_by_field_name("name")
+            cls_name = name_node.text.decode("utf-8") if name_node else None
+            new_stack = class_stack + [cls_name] if cls_name else class_stack
+            body = node.child_by_field_name("body")
+            if body:
+                for child in body.children:
+                    self._walk_declarations(
+                        child, module_path, call_map, source, new_stack
+                    )
+            return
+
+        # ── Function declarations: function foo() { ... } ─────────────────────
+        if ntype == "function_declaration":
+            name_node = node.child_by_field_name("name")
+            if name_node:
+                func_name = name_node.text.decode("utf-8")
+                qualified = self._qualify(module_path, func_name, class_stack)
+                body = node.child_by_field_name("body")
+                if body:
+                    callees = self._extract_callees(body, source)
+                    existing = call_map.get(qualified, set())
+                    call_map[qualified] = existing | callees
+            return
+
+        # ── Method definitions: class X { foo() {} } ──────────────────────────
+        if ntype == "method_definition":
+            name_node = node.child_by_field_name("name")
+            if name_node:
+                method_name = name_node.text.decode("utf-8")
+                qualified = self._qualify(module_path, method_name, class_stack)
+                body = node.child_by_field_name("body")
+                if body:
+                    callees = self._extract_callees(body, source)
+                    existing = call_map.get(qualified, set())
+                    call_map[qualified] = existing | callees
+            return
+
+        # ── Variable declarations with arrow functions / function expressions ──
+        # const foo = () => { ... }  or  const foo = function() { ... }
+        if ntype in ("lexical_declaration", "variable_declaration"):
+            for child in node.children:
+                if child.type == "variable_declarator":
+                    name_node = child.child_by_field_name("name")
+                    value_node = child.child_by_field_name("value")
+                    if name_node and value_node:
+                        fn_node = value_node
+                        # Handle: const foo = async () => {} (unwrap await/type assertion)
+                        if fn_node.type in ("as_expression", "satisfies_expression"):
+                            fn_node = fn_node.children[0] if fn_node.children else fn_node
+                        if fn_node.type in ("arrow_function", "function", "function_expression"):
+                            var_name = name_node.text.decode("utf-8")
+                            qualified = self._qualify(module_path, var_name, class_stack)
+                            body = fn_node.child_by_field_name("body")
+                            if body:
+                                callees = self._extract_callees(body, source)
+                                existing = call_map.get(qualified, set())
+                                call_map[qualified] = existing | callees
+            return
+
+        # ── Export default arrow function / function ──────────────────────────
+        # export default async function foo() { ... }
+        # export default () => { ... }
+        if ntype in ("export_statement",):
+            for child in node.children:
+                if child.type == "function_declaration":
+                    self._walk_declarations(
+                        child, module_path, call_map, source, class_stack
+                    )
+                elif child.type in ("arrow_function", "function", "function_expression"):
+                    qualified = f"{module_path}.<module>"
+                    body = child.child_by_field_name("body")
+                    if body:
+                        callees = self._extract_callees(body, source)
+                        existing = call_map.get(qualified, set())
+                        call_map[qualified] = existing | callees
+                elif child.type == "lexical_declaration":
+                    self._walk_declarations(
+                        child, module_path, call_map, source, class_stack
+                    )
+                else:
+                    # export { foo } or export default class { ... }
+                    self._walk_declarations(
+                        child, module_path, call_map, source, class_stack
+                    )
+            return
+
+        # ── Recurse into other nodes ──────────────────────────────────────────
+        for child in node.children:
+            self._walk_declarations(
+                child, module_path, call_map, source, class_stack
+            )
+
+    def _qualify(
+        self, module_path: str, func_name: str, class_stack: List[str]
+    ) -> str:
+        """Build a qualified caller name: module.Class.method or module.function."""
+        if class_stack:
+            return f"{module_path}.{'.'.join(class_stack)}.{func_name}"
+        return f"{module_path}.{func_name}"
+
+    def _extract_callees(self, body_node, source: bytes) -> Set[str]:
+        """Walk a function body to find all call targets."""
+        callees: Set[str] = set()
+        self._walk_calls(body_node, callees, source)
+        return callees
+
+    def _walk_calls(self, node, callees: Set[str], source: bytes):
+        """Recursively walk the AST to find call targets.
+
+        Handles:
+          - Direct calls:     foo(args)              → "foo"
+          - Method calls:     obj.method(args)       → "method"
+          - Chained calls:    obj.a().b()             → "a", "b"
+          - new expressions:  new MyClass()           → "MyClass"
+          - await calls:      await fetchData()       → "fetchData"
+          - IIFE closures:    (() => { calls... })()  → walks closure body
+        """
+        ntype = node.type
+
+        if ntype == "call_expression":
+            fn = node.child_by_field_name("function")
+            if fn:
+                # IIFE: (() => { ... })() or (function(){ ... })()
+                if fn.type in ("arrow_function", "function", "function_expression"):
+                    closure_body = fn.child_by_field_name("body")
+                    if closure_body:
+                        self._walk_calls(closure_body, callees, source)
+                elif fn.type == "parenthesized_expression":
+                    # Unwrap: (someFunc)()
+                    for child in fn.children:
+                        if child.type in ("arrow_function", "function", "function_expression"):
+                            closure_body = child.child_by_field_name("body")
+                            if closure_body:
+                                self._walk_calls(closure_body, callees, source)
+                            break
+                else:
+                    callee = self._resolve_callee(fn, source)
+                    if callee:
+                        callees.add(callee)
+
+        elif ntype == "new_expression":
+            # new MyClass(args) → "MyClass"
+            constructor = node.child_by_field_name("constructor")
+            if constructor and constructor.type == "identifier":
+                name = constructor.text.decode("utf-8")
+                if name not in _TS_BUILTIN_SKIP and name not in _TS_OBJECT_SKIP:
+                    callees.add(name)
+
+        elif ntype == "await_expression":
+            # await foo() — the call_expression is a child, recurse
+            for child in node.children:
+                self._walk_calls(child, callees, source)
+            return
+
+        # Recurse into children, but DON'T descend into nested function
+        # declarations/arrow functions (those get their own graph entries)
+        for child in node.children:
+            if child.type in (
+                "function_declaration", "function", "function_expression",
+                "class_declaration", "class",
+            ):
+                continue  # Skip — separate declarations
+            if child.type == "arrow_function":
+                # Only skip if it's a standalone assigned closure;
+                # inline callbacks (e.g. .then(() => foo())) should be walked
+                parent = child.parent
+                if parent and parent.type == "variable_declarator":
+                    continue  # Skip — gets its own graph entry
+                # Walk inline closures (callbacks, route handlers, etc.)
+                closure_body = child.child_by_field_name("body")
+                if closure_body:
+                    self._walk_calls(closure_body, callees, source)
+                continue
+            self._walk_calls(child, callees, source)
+
+    def _resolve_callee(self, fn_node, source: bytes) -> Optional[str]:
+        """Resolve a call target to a function name.
+
+        Returns:
+          - "fetchData"        for direct calls: fetchData()
+          - "createBoard"      for method calls: this.createBoard()
+          - "fetchSprints"     for member calls: adoClient.fetchSprints()
+          - None               for stdlib/unresolvable calls
+        """
+        if fn_node.type == "identifier":
+            name = fn_node.text.decode("utf-8")
+            if name in _TS_BUILTIN_SKIP:
+                return None
+            return name
+
+        if fn_node.type == "member_expression":
+            obj_node = fn_node.child_by_field_name("object")
+            prop_node = fn_node.child_by_field_name("property")
+            if not prop_node:
+                return None
+
+            method_name = prop_node.text.decode("utf-8")
+
+            # Skip builtin methods
+            if method_name in _TS_BUILTIN_SKIP:
+                return None
+
+            # Skip calls on known stdlib objects (console.log, JSON.parse, etc.)
+            if obj_node and obj_node.type == "identifier":
+                obj_name = obj_node.text.decode("utf-8")
+                if obj_name in _TS_OBJECT_SKIP:
+                    return None
+
+            # For this.method() or self.method(), return just the method name
+            # For obj.method(), return just the method name — the resolver's
+            # bare_func_to_qualified index will match it to the right node
+            return method_name
+
+        # Chained call: foo().bar() — resolve the outer method
+        if fn_node.type == "call_expression":
+            # This is a chained call like response.json().then()
+            # Walk it as a call to get the inner callee
+            inner_fn = fn_node.child_by_field_name("function")
+            if inner_fn:
+                return self._resolve_callee(inner_fn, source)
+
+        return None
