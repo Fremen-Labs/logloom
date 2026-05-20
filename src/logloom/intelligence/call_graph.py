@@ -91,68 +91,88 @@ class CallGraphResolver:
                 for src_file in path.rglob("*"):
                     self._scan_file(src_file, call_map)
 
-        # Step 2: Identify which functions contain log sites (by function name)
-        func_to_nodes: Dict[str, List[str]] = {}
+        # Step 2: Identify which functions contain log sites (by qualified function name)
+        # Maps qualified function name -> List[node_id]
+        qualified_func_to_nodes: Dict[str, List[str]] = {}
+        # Maps bare function name -> List[qualified_function_name]
+        bare_func_to_qualified: Dict[str, List[str]] = {}
+
         for node in graph.nodes.values():
-            func_to_nodes.setdefault(node.function, []).append(node.node_id)
+            qname = f"{node.module}.{node.function}" if node.module else node.function
+            qualified_func_to_nodes.setdefault(qname, []).append(node.node_id)
 
-        # Step 2b: Build a bare-method-name → qualified-name index.
-        # The call_map uses bare names ("probeAll") from selector_expression
-        # resolution, but the graph uses receiver-qualified names
-        # ("HealthChecker.probeAll"). This index bridges the gap.
-        bare_to_qualified: Dict[str, List[str]] = {}
-        for func_name in func_to_nodes:
-            if "." in func_name:
-                bare = func_name.rsplit(".", 1)[1]
-                bare_to_qualified.setdefault(bare, []).append(func_name)
+            # Bare name is either the function name itself or the last component
+            bare = node.function.rsplit(".", 1)[1] if "." in node.function else node.function
+            bare_func_to_qualified.setdefault(bare, []).append(qname)
 
-        def _resolve_func_nodes(func_name: str) -> List[str]:
-            """Resolve a function name to node IDs, including bare→qualified fallback."""
-            node_ids = func_to_nodes.get(func_name, [])
-            if not node_ids:
-                # Try qualified forms: "probeAll" → ["HealthChecker.probeAll"]
-                for qualified in bare_to_qualified.get(func_name, []):
-                    node_ids.extend(func_to_nodes.get(qualified, []))
-            return node_ids
+        # Set of all known modules in the graph
+        known_modules = set(node.module for node in graph.nodes.values() if node.module)
 
-        def _func_matches_callee(func_name: str, callee: str) -> bool:
-            """Check if a function name matches a callee, including bare match."""
-            if func_name == callee:
-                return True
-            # Bare match: callee "probeAll" matches "HealthChecker.probeAll"
-            if "." in func_name and func_name.rsplit(".", 1)[1] == callee:
-                return True
-            return False
-
-        # Step 2c: Build a bare → qualified index for call_map keys too.
-        # This covers cases where init() calls functions that exist in the graph.
-        caller_bare_to_qualified: Dict[str, List[str]] = {}
-        for caller_name in call_map:
+        def _get_caller_module(caller_name: str) -> str:
+            parts = caller_name.split(".")
+            for i in range(len(parts), 0, -1):
+                prefix = ".".join(parts[:i])
+                if prefix in known_modules:
+                    return prefix
             if "." in caller_name:
-                bare = caller_name.rsplit(".", 1)[1]
-                caller_bare_to_qualified.setdefault(bare, []).append(caller_name)
+                return caller_name.rsplit(".", 1)[0]
+            return ""
 
-        def _get_caller_callees(func_name: str) -> Set[str]:
-            """Get all callees for a function, trying exact and qualified forms."""
-            result: Set[str] = set()
-            # Exact match
-            if func_name in call_map:
-                result |= call_map[func_name]
-            # If the function is qualified (Type.Method), also check bare form
-            if "." in func_name:
-                bare = func_name.rsplit(".", 1)[1]
-                if bare in call_map:
-                    result |= call_map[bare]
-            # If the function is bare, check qualified forms in call_map
-            if "." not in func_name and func_name in caller_bare_to_qualified:
-                for qualified in caller_bare_to_qualified[func_name]:
-                    result |= call_map.get(qualified, set())
-            return result
+        def _resolve_callee_targets(caller_qname: str, callee: str) -> List[str]:
+            """Resolve a callee name to its target qualified function names,
+            preferring local/imported modules to prevent false positive matches.
+            """
+            caller_mod = _get_caller_module(caller_qname)
+
+            # 1. Local module check
+            if caller_mod:
+                local_candidates = [
+                    q for q in qualified_func_to_nodes
+                    if q.startswith(f"{caller_mod}.") and (q.endswith(f".{callee}") or q.split(".")[-1] == callee)
+                ]
+                if local_candidates:
+                    return local_candidates
+
+            # 2. Imports graph check
+            if caller_mod and graph.imports:
+                imported_modules = graph.imports.get(caller_mod, [])
+                import_candidates = []
+                for imp in imported_modules:
+                    # Resolve relative imports if needed
+                    resolved_imp = imp
+                    if imp.startswith("."):
+                        dots = 0
+                        while dots < len(imp) and imp[dots] == ".":
+                            dots += 1
+                        parent_parts = caller_mod.split(".")
+                        if len(parent_parts) >= dots:
+                            resolved_imp = ".".join(parent_parts[:-dots])
+                            if imp[dots:]:
+                                resolved_imp = f"{resolved_imp}.{imp[dots:]}"
+                        else:
+                            resolved_imp = imp.lstrip(".")
+
+                    for q in qualified_func_to_nodes:
+                        if q.startswith(f"{resolved_imp}.") and (q.endswith(f".{callee}") or q.split(".")[-1] == callee):
+                            import_candidates.append(q)
+                if import_candidates:
+                    return import_candidates
+
+            # 3. Global check (if there is a single unique match in the codebase)
+            global_candidates = bare_func_to_qualified.get(callee, [])
+            if not global_candidates and "." in callee:
+                # E.g. MyClass.start
+                bare_tail = callee.rsplit(".", 1)[1]
+                global_candidates = bare_func_to_qualified.get(bare_tail, [])
+
+            if len(global_candidates) == 1:
+                return global_candidates
+            elif len(global_candidates) > 1:
+                # Multiple candidates found in different modules: avoid linking to prevent noise
+                return []
+            return []
 
         # Step 3: For each node, populate call_parents and call_children
-        # Phase A: Also track the human-readable function names alongside
-        # the opaque node IDs. The names enable direct Kibana queries like
-        # `logloom.call_parent_names: "run_worker"` without a second lookup.
         new_nodes: Dict[str, GraphNode] = {}
         for node_id, node in graph.nodes.items():
             parents: Set[str] = set()
@@ -160,25 +180,30 @@ class CallGraphResolver:
             children: Set[str] = set()
             child_names: Set[str] = set()
 
+            q_node_func = f"{node.module}.{node.function}" if node.module else node.function
+
             # Find parent functions (functions that call this node's function)
-            for caller, callees in call_map.items():
+            for caller_qname, callees in call_map.items():
                 for callee in callees:
-                    if _func_matches_callee(node.function, callee) and caller != node.function:
-                        parent_node_ids = _resolve_func_nodes(caller)
-                        for parent_node_id in parent_node_ids:
-                            parents.add(parent_node_id)
-                        # Track the caller name even if it has no log nodes
-                        # (this surfaces uninstrumented callers in the graph)
-                        parent_names.add(caller)
+                    targets = _resolve_callee_targets(caller_qname, callee)
+                    if q_node_func in targets and caller_qname != q_node_func:
+                        # Find node IDs of caller
+                        parent_node_ids = qualified_func_to_nodes.get(caller_qname, [])
+                        for p_id in parent_node_ids:
+                            parents.add(p_id)
+                        # Track the caller's qualified name
+                        parent_names.add(caller_qname)
 
             # Find child functions (functions called by this node's function)
-            for callee in _get_caller_callees(node.function):
-                if callee != node.function:
-                    child_node_ids = _resolve_func_nodes(callee)
-                    for child_node_id in child_node_ids:
-                        children.add(child_node_id)
-                    # Track the callee name even if it has no log nodes
-                    child_names.add(callee)
+            if q_node_func in call_map:
+                for callee in call_map[q_node_func]:
+                    targets = _resolve_callee_targets(q_node_func, callee)
+                    for target_qname in targets:
+                        if target_qname != q_node_func:
+                            child_node_ids = qualified_func_to_nodes.get(target_qname, [])
+                            for c_id in child_node_ids:
+                                children.add(c_id)
+                            child_names.add(target_qname)
 
             new_nodes[node_id] = node.model_copy(update={
                 "call_parents": sorted(parents),
@@ -191,15 +216,34 @@ class CallGraphResolver:
 
     def _scan_file(self, file_path: Path, call_map: Dict[str, Set[str]]):
         """Route a file to the correct language-specific scanner."""
+        module_path = self._get_module_path(file_path)
         if file_path.suffix == ".py":
-            self._extract_python_calls(file_path, call_map)
+            self._extract_python_calls(file_path, module_path, call_map)
         elif file_path.suffix == ".go" and self._go_resolver:
             if not file_path.name.endswith("_test.go"):
-                self._go_resolver.extract_calls(file_path, call_map)
+                self._go_resolver.extract_calls(file_path, module_path, call_map)
+
+    def _get_module_path(self, file_path: Path) -> str:
+        if file_path.suffix == ".py":
+            parts = list(file_path.with_suffix("").parts)
+            if "src" in parts:
+                idx = parts.index("src")
+                return ".".join(parts[idx+1:])
+            return ".".join(parts[-3:])
+        elif file_path.suffix == ".go":
+            return str(file_path.with_suffix(""))
+        else:
+            # TS/JS
+            parts = list(file_path.with_suffix("").parts)
+            for marker in ("src", "lib", "app", "pages", "components", "api"):
+                if marker in parts:
+                    idx = parts.index(marker)
+                    return "/".join(parts[idx:])
+            return "/".join(parts[-3:])
 
     # ── Python call extraction ────────────────────────────────────────────────
 
-    def _extract_python_calls(self, file_path: Path, call_map: Dict[str, Set[str]]):
+    def _extract_python_calls(self, file_path: Path, module_path: str, call_map: Dict[str, Set[str]]):
         """Parse a Python file and populate the call_map."""
         try:
             with open(file_path, "rb") as f:
@@ -208,22 +252,33 @@ class CallGraphResolver:
             return
 
         tree = self.parser.parse(source)
-        self._walk_python_functions(tree.root_node, call_map, source)
+        self._walk_python_functions(tree.root_node, module_path, call_map, source)
 
-    def _walk_python_functions(self, node, call_map: Dict[str, Set[str]], source: bytes):
-        """Recursively find function_definitions and extract calls from their bodies."""
-        if node.type == "function_definition":
+    def _walk_python_functions(self, node, module_path: str, call_map: Dict[str, Set[str]], source: bytes, class_stack: List[str] = None):
+        """Recursively find function_definitions and extract calls from their bodies, preserving class context."""
+        if class_stack is None:
+            class_stack = []
+
+        if node.type == "class_definition":
+            name_node = node.child_by_field_name("name")
+            if name_node:
+                class_stack = class_stack + [name_node.text.decode("utf-8")]
+
+        elif node.type == "function_definition":
             name_node = node.child_by_field_name("name")
             if name_node:
                 func_name = name_node.text.decode("utf-8")
+                if class_stack:
+                    func_name = f"{'.'.join(class_stack)}.{func_name}"
+                qualified_caller = f"{module_path}.{func_name}"
                 body = node.child_by_field_name("body")
                 if body:
                     callees = self._extract_python_callees(body, source)
-                    existing = call_map.get(func_name, set())
-                    call_map[func_name] = existing | callees
+                    existing = call_map.get(qualified_caller, set())
+                    call_map[qualified_caller] = existing | callees
 
         for child in node.children:
-            self._walk_python_functions(child, call_map, source)
+            self._walk_python_functions(child, module_path, call_map, source, class_stack)
 
     def _extract_python_callees(self, body_node, source: bytes) -> Set[str]:
         """Use QueryCursor to find all function calls within a body node."""
@@ -291,7 +346,7 @@ class _GoCallGraphResolver:
             self.language = Language(tsgo.language(), "go")
         self.parser = Parser(self.language)
 
-    def extract_calls(self, file_path: Path, call_map: Dict[str, Set[str]]):
+    def extract_calls(self, file_path: Path, module_path: str, call_map: Dict[str, Set[str]]):
         """Parse a Go file and populate call_map with caller→callee edges."""
         try:
             with open(file_path, "rb") as f:
@@ -300,20 +355,21 @@ class _GoCallGraphResolver:
             return
 
         tree = self.parser.parse(source)
-        self._walk_go_declarations(tree.root_node, call_map, source)
+        self._walk_go_declarations(tree.root_node, module_path, call_map, source)
 
-    def _walk_go_declarations(self, node, call_map: Dict[str, Set[str]], source: bytes):
+    def _walk_go_declarations(self, node, module_path: str, call_map: Dict[str, Set[str]], source: bytes):
         """Find function/method declarations and package-level closures,
         extract call edges from their bodies."""
         if node.type == "function_declaration":
             name_node = node.child_by_field_name("name")
             if name_node:
                 func_name = name_node.text.decode("utf-8")
+                qualified = f"{module_path}.{func_name}"
                 body = node.child_by_field_name("body")
                 if body:
                     callees = self._extract_go_callees(body, source)
-                    existing = call_map.get(func_name, set())
-                    call_map[func_name] = existing | callees
+                    existing = call_map.get(qualified, set())
+                    call_map[qualified] = existing | callees
 
         elif node.type == "method_declaration":
             name_node = node.child_by_field_name("name")
@@ -323,9 +379,9 @@ class _GoCallGraphResolver:
                 # Qualify with receiver type: Server.handleAuth
                 receiver_type = self._extract_receiver_type(receiver)
                 if receiver_type:
-                    qualified = f"{receiver_type}.{method_name}"
+                    qualified = f"{module_path}.{receiver_type}.{method_name}"
                 else:
-                    qualified = method_name
+                    qualified = f"{module_path}.{method_name}"
 
                 body = node.child_by_field_name("body")
                 if body:
@@ -339,14 +395,14 @@ class _GoCallGraphResolver:
             #   var scanCmd = &cobra.Command{ RunE: func() { ... } }
             # Extract calls from any func_literals inside and attribute
             # them using the variable name as the caller key.
-            self._extract_var_decl_closures(node, call_map, source)
+            self._extract_var_decl_closures(node, module_path, call_map, source)
 
         # Recurse into children (handles nested structures, init functions, etc.)
         for child in node.children:
-            self._walk_go_declarations(child, call_map, source)
+            self._walk_go_declarations(child, module_path, call_map, source)
 
     def _extract_var_decl_closures(
-        self, var_decl_node, call_map: Dict[str, Set[str]], source: bytes
+        self, var_decl_node, module_path: str, call_map: Dict[str, Set[str]], source: bytes
     ):
         """Extract calls from func_literals inside package-level var declarations.
 
@@ -359,7 +415,7 @@ class _GoCallGraphResolver:
             }
 
         The go_scanner assigns log calls inside these closures to '<module>'
-        since there's no enclosing function_declaration. We use '<module>' as
+        since there's no enclosing function_declaration. We use qualified '<module>' as
         the caller key so the call_graph resolver can match them.
         """
         func_literals = []
@@ -370,9 +426,10 @@ class _GoCallGraphResolver:
             if body:
                 callees = self._extract_go_callees(body, source)
                 if callees:
-                    # Use '<module>' to match what go_scanner assigns
-                    existing = call_map.get("<module>", set())
-                    call_map["<module>"] = existing | callees
+                    # Use qualified '<module>' to match what go_scanner assigns
+                    q_caller = f"{module_path}.<module>"
+                    existing = call_map.get(q_caller, set())
+                    call_map[q_caller] = existing | callees
 
     def _find_func_literals(self, node, results: list):
         """Recursively find all func_literal nodes within a subtree."""

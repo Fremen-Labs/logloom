@@ -16,7 +16,9 @@ from ..graph.store import save_graph
 @click.option("--imports/--no-imports", default=True, help="Extract module-level import relationships.")
 @click.option("--languages", default="python", help="Comma-separated languages: python,go,typescript.")
 @click.option("--name", "project_name", default=None, help="Project name (auto-detected from pyproject.toml or directory).")
-def build(source: str, output: str, verbose: bool, redact_patterns: str, git: bool, tags: bool, call_graph: bool, coverage: bool, models: bool, imports: bool, languages: str, project_name: str):
+@click.option("--external-imports", is_flag=True, help="Include external/third-party modules in the import graph.")
+@click.option("--min-coverage", type=float, default=None, help="Fail the build if log coverage percentage is below this threshold.")
+def build(source: str, output: str, verbose: bool, redact_patterns: str, git: bool, tags: bool, call_graph: bool, coverage: bool, models: bool, imports: bool, languages: str, project_name: str, external_imports: bool, min_coverage: float):
     """Build the LogLoom knowledge graph from source code."""
     source_path = Path(source)
     if not source_path.exists():
@@ -38,6 +40,7 @@ def build(source: str, output: str, verbose: bool, redact_patterns: str, git: bo
         enable_models=models,
         enable_imports=imports,
         languages=lang_list,
+        include_external_imports=external_imports,
     )
 
     if verbose:
@@ -65,3 +68,8 @@ def build(source: str, output: str, verbose: bool, redact_patterns: str, git: bo
         parts.append(f"commit {graph.commit_sha[:8]}")
 
     click.echo(f"✅ Built graph: {', '.join(parts)} → {output}")
+
+    if min_coverage is not None and graph.coverage:
+        if graph.coverage.coverage_pct < min_coverage:
+            click.echo(f"❌ Build failed: coverage {graph.coverage.coverage_pct}% is below required minimum threshold {min_coverage}%", err=True)
+            raise SystemExit(1)

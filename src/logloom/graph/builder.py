@@ -70,6 +70,7 @@ class GraphBuilder:
         enable_models: bool = True,
         enable_imports: bool = True,
         languages: Optional[List[str]] = None,
+        include_external_imports: bool = False,
     ) -> LogLoomGraph:
         """Build the LogLoom knowledge graph from source files.
 
@@ -240,7 +241,7 @@ class GraphBuilder:
         if enable_imports:
             try:
                 from ..intelligence.import_graph import compute_imports
-                graph.imports = compute_imports(source_paths, languages)
+                graph.imports = compute_imports(source_paths, languages, include_external=include_external_imports)
             except Exception:
                 pass
 

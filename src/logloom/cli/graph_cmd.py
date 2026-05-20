@@ -66,6 +66,26 @@ def stats(graph_path: str):
         table.add_row("Redacted patterns", ", ".join(g.redacted_patterns))
     console.print(table)
 
+    if g.coverage:
+        cov_table = Table(title="Log Coverage Metrics", show_header=False, border_style="dim")
+        cov_table.add_column("Metric", style="bold")
+        cov_table.add_column("Value", justify="right")
+        cov_table.add_row("Coverage Percentage", f"{g.coverage.coverage_pct}%")
+        cov_table.add_row("Instrumented Functions", str(g.coverage.instrumented_functions))
+        cov_table.add_row("Total Functions", str(g.coverage.total_functions))
+        console.print(cov_table)
+
+        if g.coverage.uninstrumented:
+            uninst_table = Table(title="⚠️  Uninstrumented Functions (No Log Sites)", border_style="yellow")
+            uninst_table.add_column("Function", style="bold yellow")
+            for func in sorted(g.coverage.uninstrumented[:20]):
+                uninst_table.add_row(func)
+
+            extra = len(g.coverage.uninstrumented) - 20
+            if extra > 0:
+                uninst_table.add_row(f"... and {extra} more functions")
+            console.print(uninst_table)
+
     if level_counts:
         level_table = Table(title="Levels", border_style="dim")
         level_table.add_column("Level", style="bold")

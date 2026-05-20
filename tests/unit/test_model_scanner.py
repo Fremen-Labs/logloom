@@ -123,7 +123,9 @@ type User struct { Name string }
     (go_dir / "main.go").write_text(go_code, encoding="utf-8")
 
     models = scan_models([tmp_path], ["python", "go"])
-    assert "Task" in models
-    assert "User" in models
-    assert len(models["Task"].fields) == 2
-    assert len(models["User"].fields) == 1
+    task_key = next((k for k in models if k.endswith(".Task")), None)
+    user_key = next((k for k in models if k.endswith(".User")), None)
+    assert task_key is not None
+    assert user_key is not None
+    assert len(models[task_key].fields) == 2
+    assert len(models[user_key].fields) == 1

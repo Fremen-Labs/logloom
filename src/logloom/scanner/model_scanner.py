@@ -26,6 +26,25 @@ _GO_EXTS = {".go"}
 _TS_EXTS = {".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs"}
 
 
+def _get_module_path(file_path: Path) -> str:
+    if file_path.suffix == ".py":
+        parts = list(file_path.with_suffix("").parts)
+        if "src" in parts:
+            idx = parts.index("src")
+            return ".".join(parts[idx+1:])
+        return ".".join(parts[-3:])
+    elif file_path.suffix == ".go":
+        return str(file_path.with_suffix(""))
+    else:
+        # TS/JS
+        parts = list(file_path.with_suffix("").parts)
+        for marker in ("src", "lib", "app", "pages", "components", "api"):
+            if marker in parts:
+                idx = parts.index(marker)
+                return "/".join(parts[idx:])
+        return "/".join(parts[-3:])
+
+
 def scan_models(source_paths: List[Path], languages: List[str]) -> Dict[str, ModelDefinition]:
     """Scan all source files for data model definitions."""
     if Parser is None:
@@ -42,10 +61,12 @@ def scan_models(source_paths: List[Path], languages: List[str]) -> Dict[str, Mod
 
     for f in all_files:
         suffix = f.suffix
+        mod_path = _get_module_path(f)
         if suffix in _PYTHON_EXTS and "python" in languages:
             try:
                 for model in _extract_python_models(f):
-                    models[model.name] = model
+                    key = f"{mod_path}.{model.name}" if mod_path else model.name
+                    models[key] = model
             except Exception as e:
                 logger.debug(f"Failed to extract Python models from {f}: {e}")
 
@@ -54,14 +75,16 @@ def scan_models(source_paths: List[Path], languages: List[str]) -> Dict[str, Mod
                 continue
             try:
                 for model in _extract_go_models(f):
-                    models[model.name] = model
+                    key = f"{mod_path}.{model.name}" if mod_path else model.name
+                    models[key] = model
             except Exception as e:
                 logger.debug(f"Failed to extract Go models from {f}: {e}")
 
         elif suffix in _TS_EXTS and "typescript" in languages:
             try:
                 for model in _extract_ts_models(f):
-                    models[model.name] = model
+                    key = f"{mod_path}.{model.name}" if mod_path else model.name
+                    models[key] = model
             except Exception as e:
                 logger.debug(f"Failed to extract TypeScript models from {f}: {e}")
 
