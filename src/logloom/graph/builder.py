@@ -357,6 +357,47 @@ class GraphBuilder:
             if key not in unique_sites:
                 unique_sites[key] = site
 
+        # ── Compute project root for relative path normalization ──────────
+        # Use the common parent of all source paths as the project root.
+        # This makes the `file` field portable across machines.
+        project_root = None
+        resolved_source_paths = [p.resolve() for p in source_paths]
+        if resolved_source_paths:
+            if len(resolved_source_paths) == 1:
+                p = resolved_source_paths[0]
+                project_root = p if p.is_dir() else p.parent
+            else:
+                # Find the common ancestor of all source paths
+                try:
+                    # Python 3.12+ has Path.parents, use os.path.commonpath
+                    import os
+                    common = Path(os.path.commonpath([str(p) for p in resolved_source_paths]))
+                    project_root = common if common.is_dir() else common.parent
+                except ValueError:
+                    project_root = resolved_source_paths[0] if resolved_source_paths[0].is_dir() else resolved_source_paths[0].parent
+
+        def _relativize(abs_path_str: str) -> str:
+            """Convert an absolute path to a project-relative path."""
+            if project_root is None:
+                return abs_path_str
+            try:
+                return str(Path(abs_path_str).resolve().relative_to(project_root))
+            except (ValueError, TypeError):
+                return abs_path_str
+
+        def _relativize_module(module_str: str) -> str:
+            """Relativize a module path if it contains absolute path segments."""
+            if project_root is None or not module_str:
+                return module_str
+            # Only relativize if the module starts with a "/" (absolute path)
+            # This catches Go scanner output but preserves Python dot-separated modules
+            if module_str.startswith("/"):
+                try:
+                    return str(Path(module_str).resolve().relative_to(project_root))
+                except (ValueError, TypeError):
+                    return module_str
+            return module_str
+
         hasher = NodeHasher()
         nodes = {}
         for site in unique_sites.values():
@@ -396,8 +437,8 @@ class GraphBuilder:
 
             nodes[node_id] = GraphNode(
                 node_id=node_id,
-                file=site.file_path,
-                module=site.module_path,
+                file=_relativize(site.file_path),
+                module=_relativize_module(site.module_path),
                 function=site.function_name,
                 level=site.log_level,
                 message_template=msg_template,

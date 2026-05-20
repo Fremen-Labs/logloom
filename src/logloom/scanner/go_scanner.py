@@ -235,6 +235,19 @@ class GoScanner:
             # Phase B: Extract function signature
             sig = ctx.pop("_signature", None)
 
+            # ── Content-based level inference for generic print calls ─────
+            # fmt.Printf, fmt.Println, log.Printf, etc. default to "info"
+            # but the message content often indicates error/warning semantics.
+            if level == "info" and method_name in (
+                "Print", "Printf", "Println", "Fprintf",
+                "Fatalf", "Fatalln",
+            ):
+                # Fatalf/Fatalln are always critical — they call os.Exit(1)
+                if method_name in ("Fatalf", "Fatalln"):
+                    level = "critical"
+                else:
+                    level = self._infer_level_from_content(message)
+
             sites.append(LogCallSite(
                 file_path=str(file_path),
                 module_path=self._get_module_path(file_path),
@@ -249,6 +262,48 @@ class GoScanner:
             ))
 
         return sites
+
+    # ── Content-based level inference ─────────────────────────────────────────
+
+    _ERROR_PREFIXES = (
+        "error", "Error", "ERROR",
+        "fail", "Fail", "FAIL",
+        "fatal", "Fatal", "FATAL",
+        "panic", "Panic", "PANIC",
+        "cannot", "Cannot", "CANNOT",
+        "unable", "Unable", "UNABLE",
+        "invalid", "Invalid", "INVALID",
+        "✗", "✘", "❌",
+        "\033[31m",  # ANSI red escape
+    )
+    _WARNING_PREFIXES = (
+        "warn", "Warn", "WARN",
+        "Warning", "WARNING",
+        "⚠",
+        "\033[33m",  # ANSI yellow escape
+    )
+    _ERROR_KEYWORDS = frozenset({
+        "FAILED", "failed", "error:", "Error:", "fatal:", "Fatal:",
+    })
+
+    def _infer_level_from_content(self, message: str) -> str:
+        """Infer log level from message content when the call method doesn't carry level info.
+
+        Used for ``fmt.Printf``, ``fmt.Println``, etc. that default to 'info'.
+        """
+        stripped = message.lstrip()
+        # Check ANSI escape sequences and prefixes
+        for prefix in self._ERROR_PREFIXES:
+            if stripped.startswith(prefix):
+                return "error"
+        for prefix in self._WARNING_PREFIXES:
+            if stripped.startswith(prefix):
+                return "warning"
+        # Check for error keywords anywhere in the message
+        for kw in self._ERROR_KEYWORDS:
+            if kw in message:
+                return "error"
+        return "info"
 
     # ── False-positive detection ──────────────────────────────────────────────
 
@@ -560,6 +615,43 @@ class GoScanner:
                                     enclosing_func = child.text.decode("utf-8")
                                     in_closure = True
                                     break
+
+                    # Cobra pattern: var buildCmd = &cobra.Command{ RunE: func(cmd, args) error { ... } }
+                    # AST: func_literal → keyed_element → literal_value → composite_literal → unary_expression → var_specification → var_declaration
+                    # We walk up to find keyed_element for the field name and var_specification for the var name.
+                    if not enclosing_func and gparent:
+                        field_name = None
+                        var_name = None
+                        walk = gparent
+                        for _ in range(8):  # Max depth to avoid infinite loops
+                            if walk is None:
+                                break
+                            if walk.type == "keyed_element" and not field_name:
+                                # Extract the field name (RunE, Run, PreRunE, etc.)
+                                for child in walk.children:
+                                    if child.type in ("field_identifier", "literal_element"):
+                                        field_name = child.text.decode("utf-8")
+                                        break
+                            elif walk.type == "var_spec":
+                                # Extract the var name (buildCmd)
+                                name_node = walk.child_by_field_name("name")
+                                if name_node:
+                                    var_name = name_node.text.decode("utf-8")
+                                else:
+                                    for child in walk.children:
+                                        if child.type == "identifier":
+                                            var_name = child.text.decode("utf-8")
+                                            break
+                                break  # Found var — stop walking
+                            walk = walk.parent
+
+                        if var_name and field_name:
+                            enclosing_func = f"{var_name}.{field_name}"
+                            in_closure = True
+                        elif var_name:
+                            enclosing_func = var_name
+                            in_closure = True
+
                     if not enclosing_func:
                         in_closure = True
                         # Will inherit the outer function name when we continue walking up

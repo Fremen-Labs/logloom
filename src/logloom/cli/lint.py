@@ -53,7 +53,29 @@ def lint(source: str, graph_path: str, strict: bool):
     for node in g.nodes.values():
         graph_locations.add((node.file, node.line))
 
-    discovered_locations = set(discovered.keys())
+    # Normalize discovered locations: the graph may contain relative paths
+    # while discovered sites have absolute paths. Try both representations.
+    # First, check if graph uses relative paths (no "/" prefix on first entry).
+    graph_uses_relative = False
+    for node in g.nodes.values():
+        if node.file and not Path(node.file).is_absolute():
+            graph_uses_relative = True
+        break
+
+    discovered_locations = set()
+    normalized_discovered = {}  # normalized (file, line) → LogCallSite
+    for (fpath, line), site in discovered.items():
+        if graph_uses_relative:
+            try:
+                rel = str(Path(fpath).resolve().relative_to(source_path.resolve()))
+                discovered_locations.add((rel, line))
+                normalized_discovered[(rel, line)] = site
+            except ValueError:
+                discovered_locations.add((fpath, line))
+                normalized_discovered[(fpath, line)] = site
+        else:
+            discovered_locations.add((fpath, line))
+            normalized_discovered[(fpath, line)] = site
 
     untracked = discovered_locations - graph_locations
     stale = graph_locations - discovered_locations
@@ -75,7 +97,7 @@ def lint(source: str, graph_path: str, strict: bool):
         table.add_column("Message")
 
         for file_path, line in sorted(untracked):
-            site = discovered.get((file_path, line))
+            site = normalized_discovered.get((file_path, line))
             if site:
                 table.add_row(
                     str(site.file_path),

@@ -288,6 +288,17 @@ class TypeScriptScanner:
                         key_node = parent.parent.child_by_field_name("key")
                         if key_node:
                             enclosing_func = key_node.text.decode("utf-8")
+                    # Route handler: router.post('/path', async (c) => { ... })
+                    # AST: arrow_function → arguments → call_expression
+                    #       call_expression.function = member_expression
+                    #         member_expression.property = "post" (HTTP method)
+                    #       call_expression.arguments[0] = string "/path"
+                    elif parent.parent and parent.parent.type == "arguments":
+                        call_expr = parent.parent.parent
+                        if call_expr and call_expr.type == "call_expression":
+                            route_name = self._synthesize_route_handler_name(call_expr)
+                            if route_name:
+                                enclosing_func = route_name
                     for child in parent.children:
                         if child.type == "async":
                             is_async = True
@@ -305,6 +316,13 @@ class TypeScriptScanner:
                         name_node = parent.parent.child_by_field_name("name")
                         if name_node:
                             enclosing_func = name_node.text.decode("utf-8")
+                    # Route handler callback: router.get('/path', function(c) { ... })
+                    elif parent.parent and parent.parent.type == "arguments":
+                        call_expr = parent.parent.parent
+                        if call_expr and call_expr.type == "call_expression":
+                            route_name = self._synthesize_route_handler_name(call_expr)
+                            if route_name:
+                                enclosing_func = route_name
                     # Check for async
                     for child in parent.children:
                         if child.type == "async":
@@ -451,6 +469,65 @@ class TypeScriptScanner:
             name = left.text.decode("utf-8") if left else "?"
             default = right.text.decode("utf-8") if right else None
             return {"name": name, "type_hint": None, "default": default}
+
+        return None
+
+    # ── Route handler name synthesis ──────────────────────────────────────────
+
+    # HTTP method names used by Hono, Express, Fastify, Koa, etc.
+    _ROUTE_METHODS = frozenset({
+        "get", "post", "put", "patch", "delete", "head", "options", "all",
+        "use",  # middleware
+    })
+
+    def _synthesize_route_handler_name(self, call_expr_node) -> Optional[str]:
+        """Synthesize a function name from a route registration call.
+
+        For ``router.post('/tickets', async (c) => { ... })``, produces ``POST_/tickets``.
+        For ``app.use('*', middleware)``, produces ``USE_*``.
+        For ``app.on('error', handler)``, produces ``on_error``.
+
+        AST structure:
+            call_expression
+              function: member_expression
+                object: identifier "router"
+                property: property_identifier "post"
+              arguments: (string "/tickets", arrow_function)
+        """
+        fn_node = call_expr_node.child_by_field_name("function")
+        if not fn_node or fn_node.type != "member_expression":
+            return None
+
+        prop_node = fn_node.child_by_field_name("property")
+        if not prop_node:
+            return None
+
+        method_name = prop_node.text.decode("utf-8")
+
+        # Check if this is a known HTTP route method
+        if method_name.lower() in self._ROUTE_METHODS:
+            # Extract the route path from the first string argument
+            args_node = call_expr_node.child_by_field_name("arguments")
+            if args_node:
+                for child in args_node.children:
+                    if child.type in ("string", "template_string"):
+                        path = child.text.decode("utf-8").strip("'\"`")
+                        return f"{method_name.upper()}_{path}"
+                    if child.type not in ("(", ")", ","):
+                        break  # First non-punctuation arg isn't a string
+            # No path found — use just the method
+            return f"{method_name.upper()}_handler"
+
+        # Generic event handler: app.on('error', handler)
+        if method_name == "on":
+            args_node = call_expr_node.child_by_field_name("arguments")
+            if args_node:
+                for child in args_node.children:
+                    if child.type == "string":
+                        event = child.text.decode("utf-8").strip("'\"")
+                        return f"on_{event}"
+                    if child.type not in ("(", ")", ","):
+                        break
 
         return None
 
