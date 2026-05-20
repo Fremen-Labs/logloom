@@ -73,6 +73,22 @@ LOGLOOM_FIELD_MAPPING: Dict[str, Any] = {
             "call_child_names": {
                 "type": "keyword",
             },
+            # Phase B: Function signature of the enclosing function.
+            "signature": {
+                "properties": {
+                    "parameters": {
+                        "type": "nested",
+                        "properties": {
+                            "name": {"type": "keyword"},
+                            "type_hint": {"type": "keyword"},
+                            "default": {"type": "keyword"},
+                        },
+                    },
+                    "return_type": {"type": "keyword"},
+                    "is_async": {"type": "boolean"},
+                    "decorators": {"type": "keyword"},
+                },
+            },
             "graph_version": {
                 "type": "keyword",
             },
@@ -169,7 +185,7 @@ def generate_enrichment_documents(
     """
     docs = []
     for node in graph.nodes.values():
-        docs.append({
+        doc = {
             "_id": node.node_id,
             "logloom": {
                 "node_id": node.node_id,
@@ -188,7 +204,11 @@ def generate_enrichment_documents(
                 "commit_sha": graph.commit_sha,
                 "branch": graph.branch,
             },
-        })
+        }
+        # Phase B: Include function signature if present
+        if node.signature:
+            doc["logloom"]["signature"] = node.signature.model_dump()
+        docs.append(doc)
     return docs
 
 
@@ -233,6 +253,7 @@ def generate_enrich_policy(
                 "logloom.call_children",
                 "logloom.call_parent_names",
                 "logloom.call_child_names",
+                "logloom.signature",
                 "logloom.graph_version",
                 "logloom.commit_sha",
                 "logloom.branch",

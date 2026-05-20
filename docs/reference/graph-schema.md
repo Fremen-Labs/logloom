@@ -6,10 +6,11 @@ The knowledge graph produced by `logloom build` adheres to a strict JSON schema 
 
 | Field | Type | Description |
 | :--- | :--- | :--- |
-| `schema_version` | String | The version of the LogLoom schema (currently `"1"`). |
+| `schema_version` | String | The version of the LogLoom schema (currently `"1.2"`). |
 | `project` | String | The name of the project configured in `.logloomrc.toml`. |
 | `built_at` | String (ISO 8601) | The UTC timestamp when the graph was generated. |
 | `commit_sha` | String (Optional) | The Git commit hash at the time of the build. |
+| `branch` | String (Optional) | The Git branch at the time of the build. |
 | `redacted_patterns` | Array of Strings | List of redaction patterns applied during the build. |
 | `nodes` | Object | A map where the keys are the `ll:` node IDs and the values are `GraphNode` objects. |
 
@@ -19,12 +20,32 @@ The knowledge graph produced by `logloom build` adheres to a strict JSON schema 
 | :--- | :--- | :--- |
 | `node_id` | String | The deterministic `ll:` identifier. |
 | `file` | String | The relative file path to the log statement. |
-| `module` | String | The Python module path (e.g., `app.services.auth`). |
+| `module` | String | The language-specific module path (e.g., `app.services.auth`). |
 | `function` | String | The innermost enclosing function name (or `<module>`). |
 | `level` | String | The logging severity level (e.g., `info`, `error`). |
-| `message_template` | String | The extracted template string (with `f-string` interpolations replaced by `{}`). |
+| `message_template` | String | The extracted template string (with variable interpolations replaced by `{}`). |
 | `line` | Integer | The 1-indexed line number in the source file. |
-| `semantic_tags` | Array of Strings | Inferred tags based on context (e.g., `["error"]`). |
+| `semantic_tags` | Array of Strings | Inferred tags based on context (e.g., `["error", "auth"]`). |
 | `lexical_parents` | Array of Strings | The structural scopes containing the log statement. |
-| `call_parents` | Array of Strings | (Milestone 2) Nodes that call this scope. |
-| `call_children` | Array of Strings | (Milestone 2) Nodes called by this scope. |
+| `call_parents` | Array of Strings | Opaque `ll:` node IDs of direct caller scopes. |
+| `call_children` | Array of Strings | Opaque `ll:` node IDs of direct callee scopes. |
+| `call_parent_names` | Array of Strings | Human-readable function names of callers (useful for Kibana/Lens visualization). |
+| `call_child_names` | Array of Strings | Human-readable function names of callees, including uninstrumented functions. |
+| `signature` | Object (Optional) | Detailed function signature of the enclosing function. Adheres to the [FunctionSignature](#functionsignature-object) schema. |
+
+## FunctionSignature Object
+
+| Field | Type | Description |
+| :--- | :--- | :--- |
+| `parameters` | Array of Objects | List of parameters of the function. Each object adheres to the [Parameter](#parameter-object) schema. |
+| `return_type` | String (Optional) | The return type annotation or signature of the function (e.g., `-> bool`, `(bool, error)`, `Promise<void>`). |
+| `is_async` | Boolean | Whether the function is declared async/coroutine (`true` for Python `async def`, JS `async function`, etc.). |
+| `decorators` | Array of Strings | List of decorator names applied to the function (e.g., `["route('/login')", "auth_required"]`). |
+
+## Parameter Object
+
+| Field | Type | Description |
+| :--- | :--- | :--- |
+| `name` | String | The parameter name (excluding `self`/`cls` in Python). |
+| `type_hint` | String (Optional) | The type annotation or type hint for this parameter. |
+| `default` | String (Optional) | The default value for this parameter if defined in the signature. |

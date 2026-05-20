@@ -396,8 +396,22 @@ Elastic APM agents inject `trace.id`, `transaction.id`, and `span.id` into log r
   "logloom.file": "src/routes/auth.ts",
   "logloom.line": 47,
   "logloom.tags": ["auth", "security"],
-  "logloom.call_parents": ["validateToken", "refreshSession"],
-  "logloom.call_children": ["checkPermissions"],
+  "logloom.call_parents": ["ll:a1b2c3d4", "ll:f5g6h7i8"],
+  "logloom.call_children": ["ll:j9k0l1m2"],
+  "logloom.call_parent_names": ["validateToken", "refreshSession"],
+  "logloom.call_child_names": ["checkPermissions"],
+  "logloom.signature": {
+    "parameters": [
+      {
+        "name": "token",
+        "type_hint": "string",
+        "default": null
+      }
+    ],
+    "return_type": "Promise<User>",
+    "is_async": true,
+    "decorators": []
+  },
   "logloom.commit_sha": "bba435c3",
   
   "kubernetes.pod.name": "vorsam-backend-7b8f9c-x2k4n",
@@ -523,8 +537,13 @@ Without LogLoom, Elastic Beats give you:
 | `logloom.file` | Source file path | Direct link to code |
 | `logloom.line` | Line number | Pinpoint exact location |
 | `logloom.tags` | `["auth", "security", "error"]` | Semantic filtering: "all auth-related failures" |
-| `logloom.call_parents` | Upstream callers | "Who calls this function?" |
-| `logloom.call_children` | Downstream callees | "What does this function call?" |
+| `logloom.call_parents` | Opaque `ll:` node IDs of upstream callers | Navigate caller/callee links inside a graph visualization |
+| `logloom.call_children` | Opaque `ll:` node IDs of downstream callees | Navigate downstream call sites |
+| `logloom.call_parent_names`| Array of human-readable caller names | "Filter logs triggered by `refreshSession` or `loginFlow`" |
+| `logloom.call_child_names` | Array of human-readable callee names | "Filter logs that flow into `checkPermissions`" |
+| `logloom.signature.return_type` | Return type annotation (e.g., `Promise<User>`) | Filter by API/service response contracts |
+| `logloom.signature.is_async` | Boolean status of enclosing function | Group / analyze execution style of log sources |
+| `logloom.signature.decorators` | Applied decorators (e.g., `["route('/login')"]`) | Find logs routed via specific framework endpoints |
 | `logloom.commit_sha` | Git commit | Correlate log behavior to specific deploys |
 | `logloom.message_template` | Original template string | Group log variants (`"Connecting to {} at {}"`) |
 
@@ -537,6 +556,10 @@ message: "login failed" AND kubernetes.namespace: "production"
 # With LogLoom — surgical, semantic
 logloom.tags: "auth" AND logloom.function: "authenticate" AND logloom.commit_sha: "bba435c3*"
 
-# Call-graph traversal — find the root cause chain
-logloom.call_parents: "refreshSession" AND logloom.tags: "error"
+# Call-graph traversal using human-readable target names (Phase A)
+logloom.call_parent_names: "refreshSession" AND logloom.tags: "error"
+
+# Signature-based analysis (Phase B)
+# Query for logs from async functions that return a Promise:
+logloom.signature.is_async: true AND logloom.signature.return_type: "Promise*"
 ```

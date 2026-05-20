@@ -107,8 +107,8 @@ class TestESMappingEndToEnd:
         expected_fields = {
             "node_id", "traversal", "module", "function", "file",
             "line", "tags", "level", "message_template",
-            "call_parents", "call_children",
-            "graph_version", "commit_sha", "branch",
+            "call_parents", "call_children", "call_parent_names", "call_child_names",
+            "signature", "graph_version", "commit_sha", "branch",
         }
         actual_fields = set(props.keys())
         missing = expected_fields - actual_fields
@@ -227,7 +227,7 @@ class TestOTELBridgeEndToEnd:
         attrs = get_otel_resource_attributes(rich_graph)
 
         assert attrs["logloom.project"] == "test-ecosystem"
-        assert attrs["logloom.schema_version"] == "1.1"
+        assert attrs["logloom.schema_version"] == "1.2"
         assert attrs["logloom.node_count"] == 4
         assert attrs["logloom.commit_sha"] == "abc123def456"
         assert attrs["logloom.branch"] == "main"

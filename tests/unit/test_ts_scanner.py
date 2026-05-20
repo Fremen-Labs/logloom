@@ -157,3 +157,30 @@ export function init() {
     sites = ts_scanner.scan_file(f)
     assert len(sites) == 1
     assert sites[0].function_name == "init"
+
+
+def test_ts_scanner_function_signatures(ts_scanner, tmp_path: Path):
+    """TypeScript scanner should extract function signatures including return types, parameters, async and decorators."""
+    f = tmp_path / "signature.ts"
+    f.write_text('''
+class OrderController {
+    @route("/order")
+    async processOrder(orderId: string, amount?: number): Promise<boolean> {
+        console.log("Processing order");
+        return true;
+    }
+}
+''')
+    sites = ts_scanner.scan_file(f)
+    assert len(sites) == 1
+    site = sites[0]
+    assert site.signature is not None
+    assert site.signature["is_async"] is True
+    assert site.signature["return_type"] == "Promise<boolean>"
+    assert "route(\"/order\")" in site.signature["decorators"]
+    assert len(site.signature["parameters"]) == 2
+    assert site.signature["parameters"][0]["name"] == "orderId"
+    assert site.signature["parameters"][0]["type_hint"] == "string"
+    assert site.signature["parameters"][1]["name"] == "amount"
+    assert site.signature["parameters"][1]["type_hint"] == "number"
+

@@ -40,7 +40,19 @@ def test_graph_builder_pipeline(tmp_path: Path):
         if node.message_template == "Login failed for {}":
             assert node.function == "do_login"
             assert "do_login" in node.lexical_parents
-            assert "error" in node.semantic_tags # exception maps to error tag? wait
+            assert "error" in node.semantic_tags
+            # Verify signature for do_login
+            assert node.signature is not None
+            assert node.signature.is_async is False
+            assert len(node.signature.parameters) == 1
+            assert node.signature.parameters[0].name == "user_id"
+            assert node.signature.parameters[0].type_hint == "int"
         if node.message_template == "Authenticating token":
             assert node.function == "authenticate"
             assert node.module.endswith("app") # Since it's in tmp_path/app.py
+            # Verify signature for authenticate (self skipped)
+            assert node.signature is not None
+            assert len(node.signature.parameters) == 1
+            assert node.signature.parameters[0].name == "token"
+            assert node.signature.parameters[0].type_hint is None
+
