@@ -2,10 +2,45 @@ import re
 from pathlib import Path
 from typing import List, Optional
 from datetime import datetime, timezone
-from .model import LogLoomGraph, GraphNode, FunctionSignature, Parameter
+from .model import LogLoomGraph, GraphNode, FunctionSignature, Parameter, ModelDefinition
 from .hasher import NodeHasher
 from ..scanner.python_scanner import PythonScanner
 from ..scanner.regex_fallback import regex_fallback_scan
+from .cache import BuildCache, calculate_file_hash
+from ..scanner.base import LogCallSite
+
+try:
+    from ..scanner.model_scanner import (
+        _extract_python_models,
+        _extract_go_models,
+        _extract_ts_models,
+    )
+except ImportError:
+    _extract_python_models = None
+    _extract_go_models = None
+    _extract_ts_models = None
+
+try:
+    from ..intelligence.import_graph import (
+        _extract_python_imports,
+        _extract_go_imports,
+        _extract_ts_imports,
+    )
+except ImportError:
+    _extract_python_imports = None
+    _extract_go_imports = None
+    _extract_ts_imports = None
+
+try:
+    from ..intelligence.coverage import (
+        _extract_python_functions,
+        _extract_go_functions,
+        _extract_ts_functions,
+    )
+except ImportError:
+    _extract_python_functions = None
+    _extract_go_functions = None
+    _extract_ts_functions = None
 
 
 def _detect_project_name(source_paths: List[Path]) -> str:
@@ -57,7 +92,116 @@ _GO_EXTS = {".go"}
 _TS_EXTS = {".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs"}
 
 
+def deserialize_site(d: dict) -> LogCallSite:
+    return LogCallSite(
+        file_path=d["file_path"],
+        module_path=d["module_path"],
+        class_name=d["class_name"],
+        function_name=d["function_name"],
+        log_level=d["log_level"],
+        message_template=d["message_template"],
+        line=d["line"],
+        column=d["column"],
+        lexical_context=d["lexical_context"],
+        signature=d["signature"],
+    )
+
+
 class GraphBuilder:
+    def _extract_file_data(self, f: Path, languages: List[str]):
+        suffix = f.suffix
+        sites = []
+        models = []
+        imports = []
+        defined_functions = []
+
+        # ── Sites ──
+        if suffix in _PYTHON_EXTS and "python" in languages:
+            sites.extend(PythonScanner().scan_file(f))
+            sites.extend(regex_fallback_scan(f))
+        elif suffix in _GO_EXTS and "go" in languages:
+            if not f.name.endswith("_test.go"):
+                try:
+                    from ..scanner.go_scanner import GoScanner
+                    go_scanner = GoScanner(exclude_tests=True)
+                    if go_scanner.available:
+                        sites.extend(go_scanner.scan_file(f))
+                except ImportError:
+                    pass
+        elif suffix in _TS_EXTS and "typescript" in languages:
+            try:
+                from ..scanner.ts_scanner import TypeScriptScanner
+                ts_scanner = TypeScriptScanner()
+                if ts_scanner.available:
+                    sites.extend(ts_scanner.scan_file(f))
+            except ImportError:
+                pass
+
+        # ── Models ──
+        if suffix in _PYTHON_EXTS and "python" in languages:
+            try:
+                if _extract_python_models:
+                    models.extend(_extract_python_models(f))
+            except Exception:
+                pass
+        elif suffix in _GO_EXTS and "go" in languages:
+            if not f.name.endswith("_test.go"):
+                try:
+                    if _extract_go_models:
+                        models.extend(_extract_go_models(f))
+                except Exception:
+                    pass
+        elif suffix in _TS_EXTS and "typescript" in languages:
+            try:
+                if _extract_ts_models:
+                    models.extend(_extract_ts_models(f))
+            except Exception:
+                pass
+
+        # ── Imports ──
+        if suffix in _PYTHON_EXTS and "python" in languages:
+            try:
+                if _extract_python_imports:
+                    imports.extend(_extract_python_imports(f))
+            except Exception:
+                pass
+        elif suffix in _GO_EXTS and "go" in languages:
+            if not f.name.endswith("_test.go"):
+                try:
+                    if _extract_go_imports:
+                        imports.extend(_extract_go_imports(f))
+                except Exception:
+                    pass
+        elif suffix in _TS_EXTS and "typescript" in languages:
+            try:
+                if _extract_ts_imports:
+                    imports.extend(_extract_ts_imports(f))
+            except Exception:
+                pass
+
+        # ── Defined Functions ──
+        if suffix in _PYTHON_EXTS and "python" in languages:
+            try:
+                if _extract_python_functions:
+                    defined_functions.extend(_extract_python_functions(f))
+            except Exception:
+                pass
+        elif suffix in _GO_EXTS and "go" in languages:
+            if not f.name.endswith("_test.go"):
+                try:
+                    if _extract_go_functions:
+                        defined_functions.extend(_extract_go_functions(f))
+                except Exception:
+                    pass
+        elif suffix in _TS_EXTS and "typescript" in languages:
+            try:
+                if _extract_ts_functions:
+                    defined_functions.extend(_extract_ts_functions(f))
+            except Exception:
+                pass
+
+        return sites, models, imports, defined_functions
+
     def build(
         self,
         source_paths: List[Path],
@@ -71,6 +215,8 @@ class GraphBuilder:
         enable_imports: bool = True,
         languages: Optional[List[str]] = None,
         include_external_imports: bool = False,
+        enable_incremental: bool = True,
+        cache_path: Path = Path(".logloom-cache.json"),
     ) -> LogLoomGraph:
         """Build the LogLoom knowledge graph from source files.
 
@@ -83,6 +229,8 @@ class GraphBuilder:
             enable_git: Embed git metadata (Issue #16).
             languages: List of language codes to scan. Default: ["python"].
                        Options: "python", "go", "typescript".
+            enable_incremental: Reuse previous scan results for unmodified files.
+            cache_path: Path to the incremental build cache file.
         """
         if project_name is None:
             project_name = _detect_project_name(source_paths)
@@ -91,6 +239,9 @@ class GraphBuilder:
             languages = ["python"]
 
         all_sites = []
+        all_models = {}
+        all_imports = {}
+        all_defined_functions = set()
 
         # ── Collect files ─────────────────────────────────────────────────
         all_files = []
@@ -100,37 +251,93 @@ class GraphBuilder:
             elif path.is_dir():
                 all_files.extend(path.rglob("*"))
 
-        # ── Python scanning ───────────────────────────────────────────────
-        if "python" in languages:
-            scanner = PythonScanner()
-            for f in all_files:
-                if f.suffix in _PYTHON_EXTS:
-                    all_sites.extend(scanner.scan_file(f))
-                    all_sites.extend(regex_fallback_scan(f))
+        # Filter active files based on languages
+        active_files = []
+        for f in all_files:
+            suffix = f.suffix
+            if suffix in _PYTHON_EXTS and "python" in languages:
+                active_files.append(f)
+            elif suffix in _GO_EXTS and "go" in languages:
+                active_files.append(f)
+            elif suffix in _TS_EXTS and "typescript" in languages:
+                active_files.append(f)
 
-        # ── Go scanning (Issue #23) ───────────────────────────────────────
-        if "go" in languages:
-            try:
-                from ..scanner.go_scanner import GoScanner
-                go_scanner = GoScanner(exclude_tests=True)
-                if go_scanner.available:
-                    for f in all_files:
-                        if f.suffix in _GO_EXTS:
-                            all_sites.extend(go_scanner.scan_file(f))
-            except ImportError:
-                pass  # tree-sitter-go not installed
+        cache = None
+        if enable_incremental:
+            cache = BuildCache(cache_path)
 
-        # ── TypeScript/JavaScript scanning (Issue #24) ────────────────────
-        if "typescript" in languages:
-            try:
-                from ..scanner.ts_scanner import TypeScriptScanner
-                ts_scanner = TypeScriptScanner()
-                if ts_scanner.available:
-                    for f in all_files:
-                        if f.suffix in _TS_EXTS:
-                            all_sites.extend(ts_scanner.scan_file(f))
-            except ImportError:
-                pass  # tree-sitter-typescript not installed
+        for f in active_files:
+            file_hash = calculate_file_hash(f)
+            cached_entry = cache.get_file_entry(f) if cache else None
+
+            if cached_entry and cached_entry.get("hash") == file_hash:
+                # Cache hit!
+                for s_dict in cached_entry.get("sites", []):
+                    all_sites.append(deserialize_site(s_dict))
+
+                mod_path = ""
+                suffix = f.suffix
+                if suffix in _PYTHON_EXTS or suffix in _GO_EXTS or suffix in _TS_EXTS:
+                    try:
+                        from ..scanner.model_scanner import _get_module_path
+                        mod_path = _get_module_path(f)
+                    except Exception:
+                        pass
+                for m_dict in cached_entry.get("models", []):
+                    m = ModelDefinition(**m_dict)
+                    key = f"{mod_path}.{m.name}" if mod_path else m.name
+                    all_models[key] = m
+
+                from ..intelligence.import_graph import _get_py_module_path, _get_go_module_path, _get_ts_module_path
+                mod_name = ""
+                if suffix in _PYTHON_EXTS:
+                    mod_name = _get_py_module_path(f)
+                elif suffix in _GO_EXTS:
+                    mod_name = _get_go_module_path(f)
+                elif suffix in _TS_EXTS:
+                    mod_name = _get_ts_module_path(f)
+                if mod_name:
+                    all_imports[mod_name] = cached_entry.get("imports", [])
+
+                for func in cached_entry.get("defined_functions", []):
+                    all_defined_functions.add(func)
+            else:
+                # Cache miss: scan
+                sites, models, imports, defined_functions = self._extract_file_data(f, languages)
+                all_sites.extend(sites)
+
+                mod_path = ""
+                suffix = f.suffix
+                if suffix in _PYTHON_EXTS or suffix in _GO_EXTS or suffix in _TS_EXTS:
+                    try:
+                        from ..scanner.model_scanner import _get_module_path
+                        mod_path = _get_module_path(f)
+                    except Exception:
+                        pass
+                for m in models:
+                    key = f"{mod_path}.{m.name}" if mod_path else m.name
+                    all_models[key] = m
+
+                from ..intelligence.import_graph import _get_py_module_path, _get_go_module_path, _get_ts_module_path
+                mod_name = ""
+                if suffix in _PYTHON_EXTS:
+                    mod_name = _get_py_module_path(f)
+                elif suffix in _GO_EXTS:
+                    mod_name = _get_go_module_path(f)
+                elif suffix in _TS_EXTS:
+                    mod_name = _get_ts_module_path(f)
+                if mod_name:
+                    all_imports[mod_name] = imports
+
+                for func in defined_functions:
+                    all_defined_functions.add(func)
+
+                if cache:
+                    cache.set_file_entry(f, file_hash, sites, models, imports, defined_functions)
+
+        if cache:
+            cache.clean_unused_entries(active_files)
+            cache.save()
 
         # Deduplicate sites by (file_path, line) giving priority to AST scanner
         unique_sites = {}
@@ -142,7 +349,6 @@ class GraphBuilder:
         hasher = NodeHasher()
         nodes = {}
         for site in unique_sites.values():
-            # Phase 1: lexical parent scope
             parent_scope = site.lexical_context.get("enclosing_function", "") if site.lexical_context else ""
 
             node_id = hasher.generate_node_id(
@@ -154,12 +360,10 @@ class GraphBuilder:
                 parent_scope=parent_scope
             )
 
-            # Basic semantic tags from level (the tagger will enrich further)
             semantic_tags = []
             if site.log_level.lower() in ("error", "critical", "exception"):
                 semantic_tags.append("error")
 
-            # Redaction
             msg_template = site.message_template
             if redact_patterns:
                 lower_msg = msg_template.lower()
@@ -168,7 +372,6 @@ class GraphBuilder:
                         msg_template = "[REDACTED]"
                         break
 
-            # Phase B: Build FunctionSignature from scanner data
             sig = None
             if site.signature:
                 sig = FunctionSignature(
@@ -194,7 +397,7 @@ class GraphBuilder:
             )
 
         graph = LogLoomGraph(
-            schema_version="1.2",
+            schema_version="2.0",
             project=project_name,
             built_at=datetime.now(timezone.utc).isoformat(),
             nodes=nodes,
@@ -207,7 +410,7 @@ class GraphBuilder:
                 from ..intelligence.tagger import infer_tags
                 graph = infer_tags(graph)
             except ImportError:
-                pass  # Build-time deps not installed
+                pass
 
         if enable_call_graph:
             try:
@@ -215,7 +418,7 @@ class GraphBuilder:
                 resolver = CallGraphResolver()
                 graph = resolver.resolve(graph, source_paths)
             except ImportError:
-                pass  # Build-time deps not installed
+                pass
 
         if enable_git:
             try:
@@ -227,21 +430,21 @@ class GraphBuilder:
         if enable_coverage:
             try:
                 from ..intelligence.coverage import compute_coverage
-                graph.coverage = compute_coverage(graph, source_paths, languages)
+                graph.coverage = compute_coverage(graph, source_paths, languages, defined_functions=all_defined_functions)
             except Exception:
                 pass
 
         if enable_models:
             try:
                 from ..scanner.model_scanner import scan_models
-                graph.models = scan_models(source_paths, languages)
+                graph.models = scan_models(source_paths, languages, pre_extracted_models=all_models)
             except Exception:
                 pass
 
         if enable_imports:
             try:
                 from ..intelligence.import_graph import compute_imports
-                graph.imports = compute_imports(source_paths, languages, include_external=include_external_imports)
+                graph.imports = compute_imports(source_paths, languages, include_external=include_external_imports, pre_extracted_imports=all_imports)
             except Exception:
                 pass
 

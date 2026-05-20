@@ -14,11 +14,12 @@ from ..graph.store import save_graph
 @click.option("--coverage/--no-coverage", default=True, help="Compute scan completeness and log coverage metrics.")
 @click.option("--models/--no-models", default=True, help="Extract data model definitions (dataclasses, structs, interfaces).")
 @click.option("--imports/--no-imports", default=True, help="Extract module-level import relationships.")
+@click.option("--incremental/--no-incremental", default=True, help="Reuse scanned files when unchanged.")
 @click.option("--languages", default="python", help="Comma-separated languages: python,go,typescript.")
 @click.option("--name", "project_name", default=None, help="Project name (auto-detected from pyproject.toml or directory).")
 @click.option("--external-imports", is_flag=True, help="Include external/third-party modules in the import graph.")
 @click.option("--min-coverage", type=float, default=None, help="Fail the build if log coverage percentage is below this threshold.")
-def build(source: str, output: str, verbose: bool, redact_patterns: str, git: bool, tags: bool, call_graph: bool, coverage: bool, models: bool, imports: bool, languages: str, project_name: str, external_imports: bool, min_coverage: float):
+def build(source: str, output: str, verbose: bool, redact_patterns: str, git: bool, tags: bool, call_graph: bool, coverage: bool, models: bool, imports: bool, incremental: bool, languages: str, project_name: str, external_imports: bool, min_coverage: float):
     """Build the LogLoom knowledge graph from source code."""
     source_path = Path(source)
     if not source_path.exists():
@@ -41,6 +42,7 @@ def build(source: str, output: str, verbose: bool, redact_patterns: str, git: bo
         enable_imports=imports,
         languages=lang_list,
         include_external_imports=external_imports,
+        enable_incremental=incremental,
     )
 
     if verbose:

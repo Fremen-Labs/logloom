@@ -4,7 +4,7 @@ import pytest
 import structlog
 from unittest.mock import MagicMock
 from logloom.logger.wrapper import get_logger, LogLoomLogger
-from logloom.graph.model import LogLoomGraph, GraphNode
+from logloom.graph.model import LogLoomGraph, GraphNode, FunctionSignature, Parameter
 
 
 def test_logger_graceful_degradation(monkeypatch):
@@ -40,7 +40,7 @@ def test_logger_graceful_degradation(monkeypatch):
 
 
 def test_logger_enrichment(monkeypatch):
-    """Test logger when graph is present: should add node_id and traversal."""
+    """Test logger when graph is present: should add node_id, traversal, and v2 enrichment fields."""
     nodes = {
         "ll:auth_ok": GraphNode(
             node_id="ll:auth_ok",
@@ -50,7 +50,19 @@ def test_logger_enrichment(monkeypatch):
             level="info",
             message_template="user authenticated",
             line=60,
-            lexical_parents=["AuthService"]
+            lexical_parents=["AuthService"],
+            call_parents=["run_auth"],
+            call_children=["db_query"],
+            call_parent_names=["run_authentication"],
+            call_child_names=["query_database"],
+            signature=FunctionSignature(
+                parameters=[
+                    Parameter(name="user", type_hint="str", default=None)
+                ],
+                return_type="None",
+                is_async=False,
+                decorators=[]
+            )
         )
     }
     graph = LogLoomGraph(project="test-proj", built_at="2026", nodes=nodes)
@@ -72,6 +84,16 @@ def test_logger_enrichment(monkeypatch):
         user="alice", 
         **{
             "logloom.node_id": "ll:auth_ok",
-            "logloom.traversal": ["AuthService"]
+            "logloom.traversal": ["AuthService"],
+            "logloom.call_parents": ["run_auth"],
+            "logloom.call_children": ["db_query"],
+            "logloom.call_parent_names": ["run_authentication"],
+            "logloom.call_child_names": ["query_database"],
+            "logloom.signature": {
+                "parameters": [{"name": "user", "type_hint": "str", "default": None}],
+                "return_type": "None",
+                "is_async": False,
+                "decorators": []
+            }
         }
     )

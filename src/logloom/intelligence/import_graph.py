@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
-from typing import Dict, List
+from typing import Dict, List, Optional
 
 try:
     from tree_sitter import Language, Parser
@@ -19,8 +19,18 @@ _GO_EXTS = {".go"}
 _TS_EXTS = {".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs"}
 
 
-def compute_imports(source_paths: List[Path], languages: List[str], include_external: bool = False) -> Dict[str, List[str]]:
+def compute_imports(
+    source_paths: List[Path],
+    languages: List[str],
+    include_external: bool = False,
+    pre_extracted_imports: Optional[Dict[str, List[str]]] = None,
+) -> Dict[str, List[str]]:
     """Compute module-to-imports mapping for all scanned files."""
+    if pre_extracted_imports is not None:
+        if not include_external:
+            return _filter_internal_imports(pre_extracted_imports)
+        return pre_extracted_imports
+
     if Parser is None:
         return {}
 

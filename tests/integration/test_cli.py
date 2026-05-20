@@ -268,3 +268,61 @@ def test_cli_diff_advanced(tmp_path: Path):
     assert "message:" in result_modified.output
 
 
+def test_cli_graph_v2_subcommands(tmp_path: Path):
+    runner = CliRunner()
+    
+    # Create sample codebase with imports and models
+    src_dir = tmp_path / "src" / "myproj"
+    src_dir.mkdir(parents=True)
+    
+    app_file = src_dir / "app.py"
+    app_file.write_text("""
+import logging
+from .models import User
+
+logger = logging.getLogger(__name__)
+
+def do_login():
+    logger.info("User logging in")
+""")
+
+    models_file = src_dir / "models.py"
+    models_file.write_text("""
+from dataclasses import dataclass
+
+@dataclass
+class User:
+    username: str
+    age: int
+""")
+
+    graph_path = tmp_path / "logloom-graph.json"
+    html_output = tmp_path / "logloom-graph.html"
+
+    # Build the graph first
+    result = runner.invoke(cli, ["build", "--source", str(tmp_path), "--output", str(graph_path), "--external-imports"])
+    assert result.exit_code == 0
+
+    # 1. Test graph imports command
+    result = runner.invoke(cli, ["graph", "imports", "--graph-path", str(graph_path)])
+    assert result.exit_code == 0
+    assert "Import Dependency Tree" in result.output
+    assert "myproj.app" in result.output
+
+    # 2. Test graph models command
+    result = runner.invoke(cli, ["graph", "models", "--graph-path", str(graph_path)])
+    assert result.exit_code == 0
+    assert "Extracted Data Models" in result.output
+    assert "User" in result.output
+
+    # 3. Test graph viz command
+    result = runner.invoke(cli, ["graph", "viz", "--graph-path", str(graph_path), "--output", str(html_output)])
+    assert result.exit_code == 0
+    assert "Generated interactive visualization" in result.output
+    assert html_output.exists()
+    
+    # Verify HTML content
+    html_content = html_output.read_text(encoding="utf-8")
+    assert "LogLoom Graph Visualization" in html_content
+    assert "GRAPH_DATA_PLACEHOLDER" not in html_content  # Should be replaced
+    assert "User logging in" in html_content

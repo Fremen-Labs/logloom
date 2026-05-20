@@ -57,6 +57,10 @@ class ModelField(BaseModel):
     type_hint: Optional[str] = None
     default: Optional[str] = None
 
+    @property
+    def is_required(self) -> bool:
+        return self.default is None
+
 
 class ModelDefinition(BaseModel):
     """Represents a scanned data model (e.g. class, struct, interface)."""
@@ -69,7 +73,7 @@ class ModelDefinition(BaseModel):
 
 class LogLoomGraph(BaseModel):
     """The full knowledge graph artifact."""
-    schema_version: str = "1.2"
+    schema_version: str = "2.0"
     project: str
     built_at: str
     commit_sha: Optional[str] = None
