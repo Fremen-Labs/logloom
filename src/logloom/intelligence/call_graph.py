@@ -206,7 +206,47 @@ class CallGraphResolver:
 
             return []
 
-        # Step 3: For each node, populate call_parents and call_children
+        # Step 3: Build a bridge index from graph qnames to call_map keys.
+        # The graph stores "module.function" (e.g. "elastro.core.index.create")
+        # while call_map stores "module.Class.function" (e.g. "elastro.core.index.IndexManager.create").
+        # We need to find all call_map keys that could correspond to each graph function.
+        graph_qname_to_call_map_keys: Dict[str, List[str]] = {}
+        for node in graph.nodes.values():
+            q = f"{node.module}.{node.function}" if node.module else node.function
+            if q in graph_qname_to_call_map_keys:
+                continue
+            matching_keys = []
+            bare = node.function.rsplit(".", 1)[-1] if "." in node.function else node.function
+            mod = node.module or ""
+            for cm_key in call_map:
+                # Exact match
+                if cm_key == q:
+                    matching_keys.append(cm_key)
+                # Same module with class prefix: "mod.Class.func" matches "mod.func"
+                elif mod and cm_key.endswith(f".{bare}") and cm_key.startswith(f"{mod}."):
+                    matching_keys.append(cm_key)
+                # Module suffix match for truncated modules:
+                # call_map has "elastro.core.index.IndexManager.create"
+                # graph has "core.index.create"
+                elif mod and cm_key.endswith(f".{bare}"):
+                    cm_parts = cm_key.rsplit(f".{bare}", 1)[0]
+                    if cm_parts.endswith(mod) or mod.endswith(cm_parts.split(".")[-len(mod.split(".")):][0] if cm_parts else ""):
+                        # Check if module segments overlap
+                        mod_parts = mod.split(".")
+                        cm_mod_parts = cm_parts.split(".")
+                        # The call_map module should end with the graph module segments
+                        if len(mod_parts) <= len(cm_mod_parts):
+                            if cm_mod_parts[-len(mod_parts):] == mod_parts:
+                                matching_keys.append(cm_key)
+            graph_qname_to_call_map_keys[q] = matching_keys
+
+        # Also build reverse: call_map key → graph qnames it could represent
+        call_map_key_to_graph_qnames: Dict[str, List[str]] = {}
+        for gq, cm_keys in graph_qname_to_call_map_keys.items():
+            for cmk in cm_keys:
+                call_map_key_to_graph_qnames.setdefault(cmk, []).append(gq)
+
+        # Step 4: For each node, populate call_parents and call_children
         new_nodes: Dict[str, GraphNode] = {}
         for node_id, node in graph.nodes.items():
             parents: Set[str] = set()
@@ -221,17 +261,28 @@ class CallGraphResolver:
                 for callee in callees:
                     targets = _resolve_callee_targets(caller_qname, callee)
                     if q_node_func in targets and caller_qname != q_node_func:
-                        # Find node IDs of caller
+                        # Find node IDs of caller — check both direct and bridged matches
                         parent_node_ids = qualified_func_to_nodes.get(caller_qname, [])
+                        if not parent_node_ids:
+                            # Bridge: call_map key might map to a different graph qname
+                            for gq in call_map_key_to_graph_qnames.get(caller_qname, []):
+                                parent_node_ids.extend(qualified_func_to_nodes.get(gq, []))
                         for p_id in parent_node_ids:
                             parents.add(p_id)
-                        # Track the caller's qualified name
+                        # Track caller name — use human-readable form
+                        caller_bare = caller_qname.rsplit(".", 1)[-1]
                         parent_names.add(caller_qname)
 
             # Find child functions (functions called by this node's function)
+            # Check all call_map keys that bridge to this graph qname
+            cm_keys_for_node = graph_qname_to_call_map_keys.get(q_node_func, [])
             if q_node_func in call_map:
-                for callee in call_map[q_node_func]:
-                    targets = _resolve_callee_targets(q_node_func, callee)
+                cm_keys_for_node = list(set(cm_keys_for_node + [q_node_func]))
+            for cm_key in cm_keys_for_node:
+                if cm_key not in call_map:
+                    continue
+                for callee in call_map[cm_key]:
+                    targets = _resolve_callee_targets(cm_key, callee)
                     for target_qname in targets:
                         if target_qname != q_node_func:
                             child_node_ids = qualified_func_to_nodes.get(target_qname, [])
